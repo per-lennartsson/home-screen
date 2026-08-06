@@ -1,0 +1,45 @@
+{
+  "version": "2.0.0",
+  "options": {
+    "env": {
+      "ZEPHYR_BASE": "/opt/nordic/ncs/v3.4.0/zephyr",
+      "ZEPHYR_TOOLCHAIN_VARIANT": "zephyr/gnu",
+      "ZEPHYR_SDK_INSTALL_DIR": "/opt/nordic/ncs/toolchains/ccc010f809/opt/zephyr-sdk",
+      "PATH": "/opt/nordic/ncs/toolchains/ccc010f809/bin:/opt/nordic/ncs/toolchains/ccc010f809/usr/bin:/opt/nordic/ncs/toolchains/ccc010f809/usr/local/bin:/opt/nordic/ncs/toolchains/ccc010f809/opt/bin:/opt/nordic/ncs/toolchains/ccc010f809/nrfutil/bin:/opt/nordic/ncs/toolchains/ccc010f809/opt/zephyr-sdk/gnu/arm-zephyr-eabi/bin:${env:PATH}"
+    }
+  },
+  "tasks": [
+    {
+      "label": "nRF: west build",
+      "type": "shell",
+      "command": "west build -b xiao_ble firmware -d firmware/build",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "nRF: west build (pristine)",
+      "type": "shell",
+      "command": "west build -b xiao_ble firmware -d firmware/build -p always",
+      "group": "build",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "nRF: west flash (UF2 bootloader)",
+      "type": "shell",
+      "command": "west flash -d firmware/build -r uf2",
+      "group": { "kind": "test", "isDefault": true },
+      "dependsOn": "nRF: west build",
+      "problemMatcher": [],
+      "detail": "Double-tap reset on the XIAO first so it mounts as a USB drive; the uf2 runner waits for and writes to it."
+    },
+    {
+      "label": "nRF: west flash (J-Link/debug probe)",
+      "type": "shell",
+      "command": "west flash -d firmware/build -r nrfjprog",
+      "group": "test",
+      "dependsOn": "nRF: west build",
+      "problemMatcher": [],
+      "detail": "Only works if SWD pads are wired to a J-Link/nRF debug probe."
+    }
+  ]
+}
