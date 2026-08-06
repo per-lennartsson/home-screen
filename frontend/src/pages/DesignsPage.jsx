@@ -55,13 +55,22 @@ function fromLayoutJson(layout) {
   }));
 }
 
-function elementLabel(el) {
+function entityValueKey(entityId, attribute) {
+  return `${entityId}::${attribute || ""}`;
+}
+
+function elementLabel(el, entityValues) {
   if (el.type === "text") return el.text || "(empty text)";
-  if (el.source === "home_assistant") return `⌂ ${el.entityId || "(no entity)"}`;
+  if (el.source === "home_assistant") {
+    if (!el.entityId) return "⌂ (no entity)";
+    const cached = entityValues[entityValueKey(el.entityId, el.attribute)];
+    if (!cached) return "⌂ …";
+    return cached.error ? `⌂ ${cached.error}` : cached.value;
+  }
   return el.value || "(empty value)";
 }
 
-function DraggableElement({ element, index, scale, selected, onSelect, onMove }) {
+function DraggableElement({ element, index, scale, selected, onSelect, onMove, entityValues }) {
   const dragRef = useRef(null);
 
   // Window-level mouse/touch listeners rather than pointer capture: works the same for
@@ -132,7 +141,7 @@ function DraggableElement({ element, index, scale, selected, onSelect, onMove })
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
     >
-      {elementLabel(element)}
+      {elementLabel(element, entityValues)}
     </div>
   );
 }
@@ -149,12 +158,39 @@ export default function DesignsPage() {
   const [editingId, setEditingId] = useState(null);
   const [preview, setPreview] = useState(null);
   const [previewing, setPreviewing] = useState(false);
+  const [entityValues, setEntityValues] = useState({});
 
   const refresh = () => api.listDesigns().then(setDesigns).catch((e) => setError(e.message));
 
   useEffect(() => {
     refresh();
   }, []);
+
+  // Canvas labels for HA-bound elements show the live value (matching what actually
+  // renders on the device, see rendering.resolve_layout) rather than the entity_id, which
+  // is often too long to fit the element's box. Debounced so editing an entity_id field
+  // doesn't fire a request per keystroke.
+  useEffect(() => {
+    const haElements = elements.filter((el) => el.type === "value" && el.source === "home_assistant" && el.entityId);
+    const missing = haElements.filter((el) => !(entityValueKey(el.entityId, el.attribute) in entityValues));
+    if (missing.length === 0) return;
+
+    const timer = setTimeout(() => {
+      missing.forEach((el) => {
+        const key = entityValueKey(el.entityId, el.attribute);
+        api
+          .previewEntity(el.entityId, el.attribute || undefined)
+          .then((result) =>
+            setEntityValues((prev) => ({
+              ...prev,
+              [key]: result.error ? { error: result.error } : { value: result.value },
+            }))
+          )
+          .catch((e) => setEntityValues((prev) => ({ ...prev, [key]: { error: e.message } })));
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [elements, entityValues]);
 
   const scale = CANVAS_CSS_WIDTH / (width || 400);
   const canvasCssHeight = (height || 300) * scale;
@@ -231,6 +267,11 @@ export default function DesignsPage() {
     try {
       const result = await api.previewEntity(draft.entityId, draft.attribute || undefined);
       setPreview(result);
+      const key = entityValueKey(draft.entityId, draft.attribute);
+      setEntityValues((prev) => ({
+        ...prev,
+        [key]: result.error ? { error: result.error } : { value: result.value },
+      }));
     } catch (e) {
       setPreview({ error: e.message });
     } finally {
@@ -369,7 +410,7 @@ export default function DesignsPage() {
                   onClick={() => setSelectedIndex(i)}
                   style={{ cursor: "pointer", fontWeight: i === selectedIndex ? 600 : 400 }}
                 >
-                  {el.type} "{elementLabel(el)}" @ ({el.x},{el.y})
+                  {el.type} "{elementLabel(el, entityValues)}" @ ({el.x},{el.y})
                   <button
                     type="button"
                     className="secondary"
@@ -449,6 +490,7 @@ export default function DesignsPage() {
                   selected={i === selectedIndex}
                   onSelect={setSelectedIndex}
                   onMove={moveElement}
+                  entityValues={entityValues}
                 />
               ))}
             </div>
