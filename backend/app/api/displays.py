@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/displays", tags=["displays"])
 
 
 @router.post("", response_model=DisplayOut)
-def create_display(payload: DisplayCreate, db: Session = Depends(get_db)):
+async def create_display(payload: DisplayCreate, db: Session = Depends(get_db)):
     if db.scalar(select(Display).where(Display.mac_address == payload.mac_address)):
         raise HTTPException(status_code=409, detail="mac_address already registered")
     if payload.gateway_id is not None and db.get(Gateway, payload.gateway_id) is None:
@@ -35,12 +35,12 @@ def create_display(payload: DisplayCreate, db: Session = Depends(get_db)):
 
 
 @router.get("", response_model=list[DisplayOut])
-def list_displays(db: Session = Depends(get_db)):
+async def list_displays(db: Session = Depends(get_db)):
     return db.scalars(select(Display)).all()
 
 
 @router.get("/{display_id}", response_model=DisplayOut)
-def get_display(display_id: int, db: Session = Depends(get_db)):
+async def get_display(display_id: int, db: Session = Depends(get_db)):
     display = db.get(Display, display_id)
     if display is None:
         raise HTTPException(status_code=404, detail="display not found")
@@ -48,7 +48,7 @@ def get_display(display_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{display_id}/assign", response_model=DisplayOut)
-def assign_design(display_id: int, payload: DisplayAssign, db: Session = Depends(get_db)):
+async def assign_design(display_id: int, payload: DisplayAssign, db: Session = Depends(get_db)):
     display = db.get(Display, display_id)
     if display is None:
         raise HTTPException(status_code=404, detail="display not found")
@@ -65,7 +65,7 @@ def assign_design(display_id: int, payload: DisplayAssign, db: Session = Depends
 
 
 @router.post("/{display_id}/status", response_model=DisplayOut)
-def report_status(display_id: int, payload: DisplayStatusReport, db: Session = Depends(get_db)):
+async def report_status(display_id: int, payload: DisplayStatusReport, db: Session = Depends(get_db)):
     """Gateway calls this after reading the `status` GATT characteristic (Section 5.1 step 4)."""
     display = db.get(Display, display_id)
     if display is None:
@@ -81,7 +81,7 @@ def report_status(display_id: int, payload: DisplayStatusReport, db: Session = D
 
 
 @router.get("/{display_id}/payload", response_model=PayloadInSync | PayloadFull | PayloadDiff)
-def get_payload(display_id: int, db: Session = Depends(get_db)):
+async def get_payload(display_id: int, db: Session = Depends(get_db)):
     """Gateway calls this right after POSTing status (Section 5.1 step 5)."""
     display = db.get(Display, display_id)
     if display is None:

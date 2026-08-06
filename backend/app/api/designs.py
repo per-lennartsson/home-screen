@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/designs", tags=["designs"])
 
 
 @router.post("", response_model=DesignOut)
-def create_design(payload: DesignCreate, db: Session = Depends(get_db)):
+async def create_design(payload: DesignCreate, db: Session = Depends(get_db)):
     design = Design(name=payload.name, layout_json=payload.layout_json)
     db.add(design)
     db.commit()
@@ -22,12 +22,12 @@ def create_design(payload: DesignCreate, db: Session = Depends(get_db)):
 
 
 @router.get("", response_model=list[DesignOut])
-def list_designs(db: Session = Depends(get_db)):
+async def list_designs(db: Session = Depends(get_db)):
     return db.scalars(select(Design)).all()
 
 
 @router.get("/{design_id}", response_model=DesignOut)
-def get_design(design_id: int, db: Session = Depends(get_db)):
+async def get_design(design_id: int, db: Session = Depends(get_db)):
     design = db.get(Design, design_id)
     if design is None:
         raise HTTPException(status_code=404, detail="design not found")
@@ -35,7 +35,7 @@ def get_design(design_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{design_id}", response_model=DesignOut)
-def update_design(design_id: int, payload: DesignUpdate, db: Session = Depends(get_db)):
+async def update_design(design_id: int, payload: DesignUpdate, db: Session = Depends(get_db)):
     design = db.get(Design, design_id)
     if design is None:
         raise HTTPException(status_code=404, detail="design not found")

@@ -16,7 +16,12 @@ class Base(DeclarativeBase):
     pass
 
 
-def get_db():
+async def get_db():
+    # async def, not def: FastAPI runs sync generator dependencies through anyio's
+    # threadpool, which failed to spawn threads in some Docker environments (see
+    # README/compose comments). SQLite is a fast local file, so running the
+    # synchronous SQLAlchemy session directly on the event loop — no thread needed —
+    # is a reasonable simplification at this app's scale.
     db = SessionLocal()
     try:
         yield db

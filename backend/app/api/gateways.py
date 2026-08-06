@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/gateways", tags=["gateways"])
 
 
 @router.post("", response_model=GatewayOut)
-def create_gateway(payload: GatewayCreate, db: Session = Depends(get_db)):
+async def create_gateway(payload: GatewayCreate, db: Session = Depends(get_db)):
     if db.scalar(select(Gateway).where(Gateway.name == payload.name)):
         raise HTTPException(status_code=409, detail="gateway name already registered")
     gateway = Gateway(name=payload.name, location=payload.location)
@@ -24,12 +24,12 @@ def create_gateway(payload: GatewayCreate, db: Session = Depends(get_db)):
 
 
 @router.get("", response_model=list[GatewayOut])
-def list_gateways(db: Session = Depends(get_db)):
+async def list_gateways(db: Session = Depends(get_db)):
     return db.scalars(select(Gateway)).all()
 
 
 @router.get("/{gateway_id}/assigned-displays", response_model=list[DisplayOut])
-def assigned_displays(gateway_id: int, db: Session = Depends(get_db)):
+async def assigned_displays(gateway_id: int, db: Session = Depends(get_db)):
     gateway = db.get(Gateway, gateway_id)
     if gateway is None:
         raise HTTPException(status_code=404, detail="gateway not found")
