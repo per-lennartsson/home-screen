@@ -1,16 +1,22 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import designs, displays, gateways
+from app.api import designs, displays, gateways, integrations
 from app.database import Base, engine
+from app.services.ha_poller import run_poller
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
-    yield
+    poller_task = asyncio.create_task(run_poller())
+    try:
+        yield
+    finally:
+        poller_task.cancel()
 
 
 app = FastAPI(title="BLE ePaper Display Backend", lifespan=lifespan)
@@ -28,6 +34,7 @@ app.add_middleware(
 app.include_router(gateways.router)
 app.include_router(displays.router)
 app.include_router(designs.router)
+app.include_router(integrations.router)
 
 
 @app.get("/api/health")

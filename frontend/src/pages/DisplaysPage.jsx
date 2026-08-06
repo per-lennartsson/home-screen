@@ -8,6 +8,8 @@ export default function DisplaysPage() {
   const [name, setName] = useState("");
   const [mac, setMac] = useState("");
   const [gatewayId, setGatewayId] = useState("");
+  const [width, setWidth] = useState(400);
+  const [height, setHeight] = useState(300);
   const [error, setError] = useState(null);
   const [payloadPreview, setPayloadPreview] = useState(null);
 
@@ -27,10 +29,12 @@ export default function DisplaysPage() {
     e.preventDefault();
     setError(null);
     try {
-      await api.createDisplay({ name, mac_address: mac, gateway_id: gatewayId ? +gatewayId : null });
+      await api.createDisplay({ name, mac_address: mac, gateway_id: gatewayId ? +gatewayId : null, width, height });
       setName("");
       setMac("");
       setGatewayId("");
+      setWidth(400);
+      setHeight(300);
       refresh();
     } catch (e) {
       setError(e.message);
@@ -87,6 +91,14 @@ export default function DisplaysPage() {
               ))}
             </select>
           </div>
+          <div className="field">
+            <label>Resolution</label>
+            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <input type="number" value={width} onChange={(e) => setWidth(+e.target.value)} style={{ width: 60 }} />
+              <span className="muted">×</span>
+              <input type="number" value={height} onChange={(e) => setHeight(+e.target.value)} style={{ width: 60 }} />
+            </div>
+          </div>
           <button type="submit">Register display</button>
         </form>
       </div>
@@ -97,6 +109,7 @@ export default function DisplaysPage() {
             <tr>
               <th>Name</th>
               <th>MAC</th>
+              <th>Resolution</th>
               <th>Design</th>
               <th>Battery</th>
               <th>Last seen</th>
@@ -110,15 +123,22 @@ export default function DisplaysPage() {
                 <td>{d.name}</td>
                 <td>{d.mac_address}</td>
                 <td>
+                  {d.width}×{d.height}
+                </td>
+                <td>
                   <select defaultValue="" onChange={(e) => assign(d.id, e.target.value)}>
                     <option value="" disabled>
                       {designs.find((x) => x.id === d.design_id)?.name || "assign design..."}
                     </option>
-                    {designs.map((des) => (
-                      <option key={des.id} value={des.id}>
-                        {des.name}
-                      </option>
-                    ))}
+                    {designs.map((des) => {
+                      const mismatch = des.width !== d.width || des.height !== d.height;
+                      return (
+                        <option key={des.id} value={des.id} disabled={mismatch}>
+                          {des.name} ({des.width}×{des.height}
+                          {mismatch ? " — mismatch" : ""})
+                        </option>
+                      );
+                    })}
                   </select>
                 </td>
                 <td>{d.battery_pct != null ? `${d.battery_pct}% (${d.battery_mv}mV)` : "-"}</td>
@@ -137,7 +157,7 @@ export default function DisplaysPage() {
             ))}
             {displays.length === 0 && (
               <tr>
-                <td colSpan={7} className="muted">
+                <td colSpan={8} className="muted">
                   No displays registered yet.
                 </td>
               </tr>

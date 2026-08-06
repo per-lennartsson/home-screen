@@ -8,6 +8,8 @@ class DisplayCreate(BaseModel):
     name: str
     mac_address: str
     gateway_id: int | None = None
+    width: int = 400
+    height: int = 300
 
 
 class DisplayAssign(BaseModel):
@@ -28,6 +30,8 @@ class DisplayOut(BaseModel):
     mac_address: str
     gateway_id: int | None
     design_id: int | None
+    width: int
+    height: int
     current_content_hash: int | None
     desired_content_hash: int | None
     battery_pct: int | None

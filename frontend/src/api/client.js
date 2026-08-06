@@ -29,4 +29,14 @@ export const api = {
   listDesigns: () => request("/designs"),
   createDesign: (data) => request("/designs", { method: "POST", body: JSON.stringify(data) }),
   updateDesign: (id, data) => request(`/designs/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+
+  getHomeAssistantConfig: () => request("/integrations/home-assistant"),
+  setHomeAssistantConfig: (data) =>
+    request("/integrations/home-assistant", { method: "PUT", body: JSON.stringify(data) }),
+  previewEntity: (entityId, attribute) =>
+    request(
+      `/integrations/home-assistant/entities/${encodeURIComponent(entityId)}${
+        attribute ? `?attribute=${encodeURIComponent(attribute)}` : ""
+      }`
+    ),
 };

@@ -15,7 +15,7 @@ from app.schemas.display import (
     PayloadFull,
     PayloadInSync,
 )
-from app.services.rendering import build_value_diff, render_and_cache
+from app.services.rendering import build_value_diff, recompute_desired_hashes
 
 router = APIRouter(prefix="/api/displays", tags=["displays"])
 
@@ -27,7 +27,13 @@ async def create_display(payload: DisplayCreate, db: Session = Depends(get_db)):
     if payload.gateway_id is not None and db.get(Gateway, payload.gateway_id) is None:
         raise HTTPException(status_code=404, detail="gateway not found")
 
-    display = Display(name=payload.name, mac_address=payload.mac_address, gateway_id=payload.gateway_id)
+    display = Display(
+        name=payload.name,
+        mac_address=payload.mac_address,
+        gateway_id=payload.gateway_id,
+        width=payload.width,
+        height=payload.height,
+    )
     db.add(display)
     db.commit()
     db.refresh(display)
@@ -55,11 +61,18 @@ async def assign_design(display_id: int, payload: DisplayAssign, db: Session = D
     design = db.get(Design, payload.design_id)
     if design is None:
         raise HTTPException(status_code=404, detail="design not found")
+    if design.width != display.width or design.height != display.height:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"resolution mismatch: design is {design.width}x{design.height}, "
+                f"display is {display.width}x{display.height}"
+            ),
+        )
 
     display.design_id = design.id
-    cache_entry = render_and_cache(db, design)
-    display.desired_content_hash = cache_entry.content_hash
     db.commit()
+    recompute_desired_hashes(db, design)
     db.refresh(display)
     return display
 

@@ -3,21 +3,26 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.db import Design, Display
+from app.models.db import Design
 from app.schemas.design import DesignCreate, DesignOut, DesignUpdate
-from app.services.rendering import render_and_cache
+from app.services.rendering import recompute_desired_hashes
 
 router = APIRouter(prefix="/api/designs", tags=["designs"])
 
 
 @router.post("", response_model=DesignOut)
 async def create_design(payload: DesignCreate, db: Session = Depends(get_db)):
-    design = Design(name=payload.name, layout_json=payload.layout_json)
+    design = Design(
+        name=payload.name,
+        layout_json=payload.layout_json,
+        width=payload.width,
+        height=payload.height,
+    )
     db.add(design)
     db.commit()
     db.refresh(design)
-    render_and_cache(db, design)
-    db.commit()
+    recompute_desired_hashes(db, design)
+    db.refresh(design)
     return design
 
 
@@ -44,12 +49,14 @@ async def update_design(design_id: int, payload: DesignUpdate, db: Session = Dep
         design.name = payload.name
     if payload.layout_json is not None:
         design.layout_json = payload.layout_json
+    if payload.width is not None:
+        design.width = payload.width
+    if payload.height is not None:
+        design.height = payload.height
     db.commit()
     db.refresh(design)
 
     # Recompute the target render + hash for every display currently on this design.
-    cache_entry = render_and_cache(db, design)
-    for display in db.scalars(select(Display).where(Display.design_id == design_id)):
-        display.desired_content_hash = cache_entry.content_hash
-    db.commit()
+    recompute_desired_hashes(db, design)
+    db.refresh(design)
     return design

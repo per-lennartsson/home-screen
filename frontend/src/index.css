@@ -168,12 +168,14 @@ button:disabled {
 
 .canvas-preview {
   position: relative;
-  width: 296px;
-  height: 152px;
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 4px;
   overflow: hidden;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+  background-size: 20px 20px;
 }
 
 .canvas-element {
@@ -181,12 +183,25 @@ button:disabled {
   color: #000;
   font-size: 11px;
   overflow: hidden;
-  border: 1px dashed rgba(0,0,0,0.2);
+  border: 1px dashed rgba(0, 0, 0, 0.2);
   padding: 1px 2px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.canvas-element:active {
+  cursor: grabbing;
 }
 
 .canvas-element.value {
-  border-color: rgba(79,140,255,0.6);
+  border-color: rgba(79, 140, 255, 0.6);
+}
+
+.canvas-element.selected {
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .muted {
