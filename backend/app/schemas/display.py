@@ -26,6 +26,12 @@ class DisplayStatusReport(BaseModel):
     battery_mv: int
 
 
+class ButtonEventReport(BaseModel):
+    # Bitmask read from the device's button_event GATT characteristic - bit i (0-4) set
+    # means physical row button i was pressed since firmware last cleared the mask.
+    button_mask: int
+
+
 class DisplayOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

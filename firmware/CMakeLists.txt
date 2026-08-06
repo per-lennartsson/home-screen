@@ -8,8 +8,11 @@ target_sources(app PRIVATE
   src/ble_service.c
   src/chunk_protocol.c
   src/battery.c
+  src/button.c
   src/epaper.c
   src/epaper_ssd1683.c
+  src/layout_store.c
+  src/rasterizer.c
 )
 
 target_include_directories(app PRIVATE src)

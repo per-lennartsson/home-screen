@@ -267,6 +267,8 @@ export default function DesignsPage() {
                     <div className="layer-title">{elementLabel(el, entityValues)}</div>
                     {el.type === "value" && el.source === "home_assistant" ? (
                       <div className="layer-sub">{el.entityId || "no entity"}</div>
+                    ) : el.type === "value" && el.source === "button" ? (
+                      <div className="layer-sub">Button row {el.buttonIndex}</div>
                     ) : (
                       <div className="layer-sub">{el.type === "text" ? "Static text" : "Static value"}</div>
                     )}
@@ -372,6 +374,13 @@ export default function DesignsPage() {
                     >
                       Home Assistant
                     </button>
+                    <button
+                      type="button"
+                      className={`tab${selected.source === "button" ? " active" : ""}`}
+                      onClick={() => updateSelected({ source: "button" })}
+                    >
+                      Button
+                    </button>
                   </div>
 
                   {selected.source === "static" ? (
@@ -379,6 +388,26 @@ export default function DesignsPage() {
                       <label>Value</label>
                       <input value={selected.value} onChange={(e) => updateSelected({ value: e.target.value })} />
                     </div>
+                  ) : selected.source === "button" ? (
+                    <>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label>Label</label>
+                        <input value={selected.value} onChange={(e) => updateSelected({ value: e.target.value })} />
+                      </div>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label>Button (row)</label>
+                        <select
+                          value={selected.buttonIndex}
+                          onChange={(e) => updateSelected({ buttonIndex: +e.target.value })}
+                        >
+                          {[0, 1, 2, 3, 4].map((i) => (
+                            <option key={i} value={i}>
+                              Row {i}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </>
                   ) : (
                     <>
                       <div className="field" style={{ marginBottom: 0 }}>

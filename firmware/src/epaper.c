@@ -4,13 +4,13 @@
  * stays natively testable (firmware/tests/) — the real driver, or the native test
  * stub, is linked in separately.
  *
- * Rasterizing a design's layout_json into actual pixels is Section 7 build-order step
- * 4 and doesn't exist yet (see firmware/README.md). Until it does, epaper_apply_full
- * pushes a blank (all-white) frame through the real hardware path — this still proves
- * out the full sync pipeline (chunk reassembly, hash handling, GATT, SPI/GPIO timing)
- * end to end on real hardware, it just doesn't draw your dashboard's content yet.
- * epaper_apply_diff has no framebuffer to patch without that rasterizer, so it decodes
- * and logs the value changes but doesn't push anything to the panel.
+ * Rasterizes via layout_store.c (retains the last-applied full layout) + rasterizer.c
+ * (draws it into `framebuffer`) — a minimal v1 rasterizer, not the full design-editor
+ * text styling (see rasterizer.h's scope note). epaper_apply_full parses the flat binary
+ * full-layout payload (docs/protocol.md — firmware has no JSON parser) and re-rasterizes
+ * everything; epaper_apply_diff patches the retained layout's affected element(s) and
+ * re-rasterizes the whole framebuffer from that updated state (full refresh only in v1,
+ * even for a diff — see the plan for this feature's "known limitations").
  */
 
 #include "epaper.h"
@@ -19,10 +19,11 @@
 #include <string.h>
 
 #include <zephyr/logging/log.h>
-#include <zephyr/sys/util.h>
 
 #include "chunk_protocol.h"
 #include "epaper_ssd1683.h"
+#include "layout_store.h"
+#include "rasterizer.h"
 
 LOG_MODULE_REGISTER(epaper, CONFIG_LOG_DEFAULT_LEVEL);
 
@@ -52,12 +53,13 @@ int epaper_init(void)
 
 bool epaper_apply_full(const uint8_t *data, size_t len)
 {
-	ARG_UNUSED(data);
-	LOG_INF("epaper: TODO rasterize %zu bytes of layout data (not implemented yet) — "
-		"pushing a blank frame so the sync pipeline is still exercised on real "
-		"hardware",
-		len);
-	return push_blank_frame();
+	if (!layout_store_apply_full(data, len)) {
+		LOG_WRN("epaper: malformed full layout payload, keeping previous content");
+		return false;
+	}
+
+	rasterizer_render(framebuffer, sizeof(framebuffer), layout_store_get());
+	return epd_ssd1683_push_full(framebuffer, sizeof(framebuffer)) == 0;
 }
 
 bool epaper_apply_diff(const uint8_t *data, size_t len)
@@ -70,14 +72,18 @@ bool epaper_apply_diff(const uint8_t *data, size_t len)
 		return false;
 	}
 
-	LOG_INF("epaper: TODO apply %d changed value(s) to the framebuffer — no "
-		"rasterizer/layout tracking exists yet, so this is decoded but not drawn",
-		count);
 	for (int i = 0; i < count; i++) {
-		LOG_INF("epaper:   element_id=%u value_len=%u", entries[i].element_id,
-			entries[i].value_len);
+		if (!layout_store_apply_diff_entry(&entries[i])) {
+			LOG_WRN("epaper: diff references unknown element_id=%u, ignoring",
+				entries[i].element_id);
+		}
 	}
-	return true;
+
+	/* v1 scope: full refresh even for a diff — no partial-refresh optimization yet
+	 * (see rasterizer.h's scope note). Still correct, just not the fastest/lowest-
+	 * power path a future version could take. */
+	rasterizer_render(framebuffer, sizeof(framebuffer), layout_store_get());
+	return epd_ssd1683_push_full(framebuffer, sizeof(framebuffer)) == 0;
 }
 
 void epaper_force_full_refresh(void)

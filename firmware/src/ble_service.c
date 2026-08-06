@@ -8,6 +8,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/byteorder.h>
 
+#include "button.h"
 #include "chunk_protocol.h"
 #include "epaper.h"
 
@@ -26,12 +27,16 @@ LOG_MODULE_REGISTER(ble_service, CONFIG_LOG_DEFAULT_LEVEL);
 	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abc0002)
 #define BT_UUID_HOMESCREEN_COMMAND_VAL                                                           \
 	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abc0003)
+#define BT_UUID_HOMESCREEN_BUTTON_EVENT_VAL                                                      \
+	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abc0004)
 
 static struct bt_uuid_128 svc_uuid = BT_UUID_INIT_128(BT_UUID_HOMESCREEN_SERVICE_VAL);
 static struct bt_uuid_128 status_uuid = BT_UUID_INIT_128(BT_UUID_HOMESCREEN_STATUS_VAL);
 static struct bt_uuid_128 data_transfer_uuid =
 	BT_UUID_INIT_128(BT_UUID_HOMESCREEN_DATA_TRANSFER_VAL);
 static struct bt_uuid_128 command_uuid = BT_UUID_INIT_128(BT_UUID_HOMESCREEN_COMMAND_VAL);
+static struct bt_uuid_128 button_event_uuid =
+	BT_UUID_INIT_128(BT_UUID_HOMESCREEN_BUTTON_EVENT_VAL);
 
 static const uint8_t adv_service_uuid[] = {BT_UUID_HOMESCREEN_SERVICE_VAL};
 static const struct bt_data ad[] = {
@@ -76,6 +81,18 @@ static void status_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 	/* Notifications aren't relied on for correctness (the gateway always explicitly
 	 * reads status per spec 5.1 step 3) — nothing to do here beyond letting the CCC
 	 * descriptor exist so a notify-capable client doesn't error subscribing. */
+}
+
+static ssize_t read_button_event(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+				  uint16_t len, uint16_t offset)
+{
+	/* Always reads live, unlike status/battery's cached-setter pattern: the mask
+	 * must be atomically read-and-cleared at the moment the gateway actually reads
+	 * it (button_consume_pending_mask), not pre-snapshotted before advertising —
+	 * otherwise a press arriving between that snapshot and the actual GATT read
+	 * would be lost a cycle early. */
+	uint8_t mask = button_consume_pending_mask();
+	return bt_gatt_attr_read(conn, attr, buf, len, offset, &mask, sizeof(mask));
 }
 
 static ssize_t write_data_transfer(struct bt_conn *conn, const struct bt_gatt_attr *attr,
@@ -175,6 +192,8 @@ BT_GATT_SERVICE_DEFINE(
 	BT_GATT_CHARACTERISTIC(&status_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
 				BT_GATT_PERM_READ, read_status, NULL, NULL),
 	BT_GATT_CCC(status_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+	BT_GATT_CHARACTERISTIC(&button_event_uuid.uuid, BT_GATT_CHRC_READ, BT_GATT_PERM_READ,
+				read_button_event, NULL, NULL),
 	BT_GATT_CHARACTERISTIC(&data_transfer_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE,
 				NULL, write_data_transfer, NULL),
 	BT_GATT_CHARACTERISTIC(&command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL,

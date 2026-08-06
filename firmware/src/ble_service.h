@@ -1,7 +1,7 @@
 /*
- * Custom GATT service (spec 4.2): status (read/notify), data_transfer (write),
- * command (write). UUIDs here are a placeholder base — generate a real one
- * (`uuidgen` or similar) before this ships; see firmware/README.md.
+ * Custom GATT service (spec 4.2): status (read/notify), button_event (read),
+ * data_transfer (write), command (write). UUIDs here are a placeholder base —
+ * generate a real one (`uuidgen` or similar) before this ships; see firmware/README.md.
  */
 
 #ifndef BLE_SERVICE_H_
@@ -34,5 +34,10 @@ int ble_service_stop_advertising(void);
  * once a data_transfer message has been applied, and by battery.c after each reading. */
 void ble_service_set_content_hash(uint32_t content_hash);
 void ble_service_set_battery(uint8_t battery_pct, uint16_t battery_mv);
+
+/* button_event characteristic: 1 byte, bit i (0-4) = checklist row i's button pressed
+ * since the mask was last read. Read-only, atomically cleared on read. No setter here —
+ * unlike status/battery, its read callback calls button_consume_pending_mask() (see
+ * button.h) directly at read time, so there's no cached value for main.c to push. */
 
 #endif /* BLE_SERVICE_H_ */

@@ -19,6 +19,7 @@
 
 #include "battery.h"
 #include "ble_service.h"
+#include "button.h"
 #include "epaper.h"
 
 LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
@@ -40,6 +41,11 @@ LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 #define WATCHDOG_TIMEOUT_MS (2 * APP_WAKE_INTERVAL_S * 1000)
 
 static K_SEM_DEFINE(sync_done_sem, 0, 1);
+
+/* Given by a button ISR (button.c) on any accepted press, so DEEP_SLEEP can end early
+ * instead of always waiting the full RTC interval — see the sleep call at the bottom of
+ * the main loop below. */
+static K_SEM_DEFINE(wake_sem, 0, 1);
 
 static const struct device *wdt_dev;
 static int wdt_channel_id = -1;
@@ -114,6 +120,9 @@ int main(void)
 
 	battery_init();
 	epaper_init();
+	if (button_init(&wake_sem) != 0) {
+		LOG_WRN("continuing without checklist buttons");
+	}
 
 	int err = ble_service_init();
 	if (err) {
@@ -134,11 +143,16 @@ int main(void)
 		advertise_and_wait_for_sync();
 
 		/* Cycle complete, synced or not — feed the watchdog and go back to
-		 * sleep. k_msleep here relies on CONFIG_PM's idle thread selecting the
-		 * SoC's deepest RTC-wake-capable sleep state; see prj.conf for why this
-		 * isn't a manual sys_poweroff()/true System OFF call. */
+		 * sleep. Sleeping via k_sem_take (not a plain k_msleep) lets a checklist
+		 * button press end DEEP_SLEEP early instead of always waiting the full RTC
+		 * interval, while still relying on CONFIG_PM's idle thread to select the
+		 * SoC's deepest RTC-wake-capable sleep state for however long we do wait;
+		 * see prj.conf for why this isn't a manual sys_poweroff()/true System OFF
+		 * call — that distinction is also what makes a plain GPIO interrupt enough
+		 * to wake us here, with no extra devicetree "wakeup-source" plumbing. */
 		watchdog_feed();
-		k_msleep(APP_WAKE_INTERVAL_S * 1000);
+		k_sem_reset(&wake_sem);
+		k_sem_take(&wake_sem, K_MSEC(APP_WAKE_INTERVAL_S * 1000));
 	}
 
 	return 0;

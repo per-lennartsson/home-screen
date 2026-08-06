@@ -28,7 +28,12 @@ def _structure_only(layout: dict) -> dict:
     stripped = deepcopy(layout)
     for element in stripped.get("elements", []):
         if element.get("type") == "value":
-            element.get("props", {}).pop("value", None)
+            props = element.get("props", {})
+            props.pop("value", None)
+            # "checked" is button elements' bound runtime state, same treatment as
+            # "value" above - stripping it is what makes a checklist toggle diff-eligible
+            # instead of forcing a full re-render every press.
+            props.pop("checked", None)
     return stripped
 
 
@@ -43,7 +48,10 @@ def structure_signature_for(layout: dict) -> int:
 def resolve_layout(layout: dict, live_values: dict[int, str]) -> dict:
     """Merge live_values (element_id -> latest fetched value) into a copy of the
     layout template. Static value elements pass through untouched; externally-sourced
-    ones get their current value substituted in, or None if nothing's been fetched yet."""
+    ones get their current value substituted in, or None if nothing's been fetched yet.
+    Button elements are similar but bind a runtime-only "checked" bool instead of
+    replacing "value" - their label text is always static, only the checked state is
+    live (see ElementLiveValue's "checked"/"unchecked" sentinel strings)."""
     resolved = deepcopy(layout)
     for element in resolved.get("elements", []):
         if element.get("type") != "value":
@@ -51,6 +59,8 @@ def resolve_layout(layout: dict, live_values: dict[int, str]) -> dict:
         props = element.setdefault("props", {})
         if props.get("source") == "home_assistant":
             props["value"] = live_values.get(element.get("id"))
+        elif props.get("source") == "button":
+            props["checked"] = live_values.get(element.get("id")) == "checked"
     return resolved
 
 
@@ -80,7 +90,10 @@ def render_and_cache(db: Session, design: Design) -> ContentCache:
 
 
 def build_value_diff(current: ContentCache, desired: ContentCache) -> dict[int, str]:
-    """Map of element_id -> new value for elements whose bound value changed.
+    """Map of element_id -> new wire value for elements whose bound state changed.
+    Button elements diff their "checked" bool (encoded as the literal strings
+    "checked"/"unchecked", the same sentinels ElementLiveValue stores); every other
+    value element diffs its "value" string as before.
 
     Only valid when current.structure_signature == desired.structure_signature —
     callers must check that before calling this.
@@ -88,19 +101,39 @@ def build_value_diff(current: ContentCache, desired: ContentCache) -> dict[int, 
     current_layout = json.loads(current.rendered_bitmap)
     desired_layout = json.loads(desired.rendered_bitmap)
 
-    current_values = {
-        el["id"]: el.get("props", {}).get("value")
-        for el in current_layout.get("elements", [])
-        if el.get("type") == "value"
+    current_elements = {
+        el["id"]: el for el in current_layout.get("elements", []) if el.get("type") == "value"
     }
     diff: dict[int, str] = {}
     for el in desired_layout.get("elements", []):
         if el.get("type") != "value":
             continue
-        new_value = el.get("props", {}).get("value")
-        if current_values.get(el["id"]) != new_value:
-            diff[el["id"]] = new_value
+        element_id = el["id"]
+        props = el.get("props", {})
+        current_props = current_elements.get(element_id, {}).get("props", {})
+        if props.get("source") == "button":
+            new_checked = bool(props.get("checked", False))
+            if bool(current_props.get("checked", False)) != new_checked:
+                diff[element_id] = "checked" if new_checked else "unchecked"
+        else:
+            new_value = props.get("value")
+            if current_props.get("value") != new_value:
+                diff[element_id] = new_value
     return diff
+
+
+def find_button_element(design: Design, button_index: int) -> dict | None:
+    """Locates the design's "value" element bound to a given physical button index
+    (0-4), if any - mirrors app.services.ha_poller._ha_bound_elements's lookup style."""
+    for element in design.layout_json.get("elements", []):
+        props = element.get("props", {})
+        if (
+            element.get("type") == "value"
+            and props.get("source") == "button"
+            and props.get("button_index") == button_index
+        ):
+            return element
+    return None
 
 
 def recompute_desired_hashes(db: Session, design: Design) -> ContentCache:

@@ -10,7 +10,6 @@ it against — writing it earlier would be untestable, unverified code.
 from __future__ import annotations
 
 import asyncio
-import json
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -29,6 +28,13 @@ class BleConnection(ABC):
     @abstractmethod
     async def write_data_transfer(self, chunk: bytes) -> None:
         """Write one chunk to the `data_transfer` characteristic."""
+
+    @abstractmethod
+    async def read_button_event(self) -> int:
+        """Read the `button_event` characteristic: a bitmask (bit i = physical row
+        button i pressed since firmware's last read of this characteristic), or 0 if
+        nothing is pending. Reading it atomically clears the pending mask firmware-side,
+        so this must only be called once per connection."""
 
     @property
     @abstractmethod
@@ -64,6 +70,14 @@ class MockDisplay:
         self.fail_next_connects = 0
         self.corrupt_next_write = False
 
+        # Bitmask of physical row buttons pressed since the last button_event read —
+        # mirrors firmware's atomic pending mask. Tests simulate a press with
+        # press_button(); a real connection clears this on read, same as firmware.
+        self.pending_button_mask = 0
+
+    def press_button(self, button_index: int) -> None:
+        self.pending_button_mask |= 1 << button_index
+
     def status(self) -> dict:
         return {
             "content_hash": self.content_hash,
@@ -84,14 +98,22 @@ class MockDisplay:
         target_hash, payload = protocol.unwrap_payload_with_target_hash(wrapped_payload)
 
         if msg_type == protocol.MSG_TYPE_FULL:
-            self.last_rendered = json.loads(payload)
+            # Firmware has no JSON parser — it receives (and this mock decodes) the
+            # flat binary format from protocol.encode_full_layout, not the original
+            # layout_json, so last_rendered here is a lossy, normalized view (see
+            # decode_full_layout's docstring), same as what the real panel would draw.
+            self.last_rendered = protocol.decode_full_layout(payload)
         elif msg_type == protocol.MSG_TYPE_DIFF:
             if self.last_rendered is None:
                 return  # can't apply a diff with nothing rendered yet
             values = protocol.decode_diff(payload)
             for element in self.last_rendered.get("elements", []):
-                if element.get("id") in values:
-                    element.setdefault("props", {})["value"] = values[element["id"]]
+                if element["id"] not in values:
+                    continue
+                if element["checkable"]:
+                    element["checked"] = values[element["id"]] == "checked"
+                else:
+                    element["text"] = values[element["id"]]
 
         # content_hash is adopted from the backend, not re-derived — see
         # wrap_payload_with_target_hash for why. last_rendered is kept only so tests
@@ -109,6 +131,11 @@ class _MockConnection(BleConnection):
 
     async def write_data_transfer(self, chunk: bytes) -> None:
         self._display.apply_chunk(chunk)
+
+    async def read_button_event(self) -> int:
+        mask = self._display.pending_button_mask
+        self._display.pending_button_mask = 0
+        return mask
 
     @property
     def mtu_payload_size(self) -> int:

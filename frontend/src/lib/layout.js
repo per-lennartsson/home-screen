@@ -12,6 +12,7 @@ export function emptyElement() {
     value: "",
     entityId: "",
     attribute: "",
+    buttonIndex: 0,
     fontSize: DEFAULT_FONT_SIZE,
     bold: false,
     align: "left",
@@ -26,6 +27,8 @@ export function toLayoutJson(elements) {
       let props;
       if (el.type === "text") {
         props = { text: el.text };
+      } else if (el.source === "button") {
+        props = { source: "button", value: el.value, button_index: el.buttonIndex };
       } else if (el.source === "home_assistant") {
         props = { source: "home_assistant", entity_id: el.entityId };
         if (el.attribute) props.attribute = el.attribute;
@@ -54,6 +57,7 @@ export function fromLayoutJson(layout) {
     value: el.props?.value || "",
     entityId: el.props?.entity_id || "",
     attribute: el.props?.attribute || "",
+    buttonIndex: el.props?.button_index ?? 0,
     fontSize: el.props?.fontSize || DEFAULT_FONT_SIZE,
     bold: !!el.props?.bold,
     align: el.props?.align || "left",

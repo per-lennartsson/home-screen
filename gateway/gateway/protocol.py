@@ -95,6 +95,81 @@ def encode_diff(values: dict[int, str]) -> bytes:
     return out
 
 
+FULL_LAYOUT_FORMAT_VERSION = 1
+LAYOUT_MAX_ELEMENTS = 16
+LAYOUT_MAX_TEXT_LEN = 32
+
+
+def encode_full_layout(layout: dict) -> bytes:
+    """Flat binary encoding of a resolved layout for a 0x01 (full) data_transfer message.
+
+    Firmware has no JSON library (docs/protocol.md's "full payload format" note already
+    calls the JSON shape a placeholder pending real rendering — this is that moment), so
+    this is the wire format it actually parses: a 1-byte format version, a 1-byte element
+    count, then one fixed-size record per element:
+      byte 0   : element_id (uint8)
+      byte 1-2 : x (uint16 LE)
+      byte 3-4 : y (uint16 LE)
+      byte 5   : flags — bit0 checkable, bit1 checked
+      byte 6   : text_len (uint8)
+      byte 7.. : text (ASCII, not null-terminated)
+    Capped at LAYOUT_MAX_ELEMENTS/LAYOUT_MAX_TEXT_LEN to match firmware's fixed-size
+    in-RAM layout store — same sizing style as CHUNK_MAX_DIFF_ENTRIES above.
+    """
+    elements = layout.get("elements", [])[:LAYOUT_MAX_ELEMENTS]
+    out = bytes([FULL_LAYOUT_FORMAT_VERSION, len(elements)])
+    for element in elements:
+        props = element.get("props", {})
+        checkable = element.get("type") == "value" and props.get("source") == "button"
+        checked = bool(props.get("checked", False)) if checkable else False
+        text = props.get("text") if element.get("type") == "text" else props.get("value")
+        text_bytes = (text or "").encode("ascii", errors="replace")[:LAYOUT_MAX_TEXT_LEN]
+
+        element_id = element["id"]
+        if not (0 <= element_id <= 255):
+            raise ValueError(f"element_id {element_id} out of uint8 range")
+        flags = (1 if checkable else 0) | (2 if checked else 0)
+
+        out += bytes([element_id])
+        out += int(element.get("x", 0)).to_bytes(2, "little")
+        out += int(element.get("y", 0)).to_bytes(2, "little")
+        out += bytes([flags, len(text_bytes)]) + text_bytes
+    return out
+
+
+def decode_full_layout(data: bytes) -> dict:
+    """Inverse of encode_full_layout — what firmware's layout_store_apply_full does
+    on-device. Used by MockDisplay (ble_transport.py) so gateway tests exercise the real
+    wire format instead of assuming the original JSON layout survives the trip."""
+    if len(data) < 2:
+        raise ValueError("full layout payload too short")
+    if data[0] != FULL_LAYOUT_FORMAT_VERSION:
+        raise ValueError(f"unsupported full layout format version {data[0]}")
+
+    count = data[1]
+    offset = 2
+    elements = []
+    for _ in range(count):
+        element_id = data[offset]
+        x = int.from_bytes(data[offset + 1 : offset + 3], "little")
+        y = int.from_bytes(data[offset + 3 : offset + 5], "little")
+        flags = data[offset + 5]
+        text_len = data[offset + 6]
+        text = data[offset + 7 : offset + 7 + text_len].decode("ascii")
+        offset += 7 + text_len
+        elements.append(
+            {
+                "id": element_id,
+                "x": x,
+                "y": y,
+                "checkable": bool(flags & 1),
+                "checked": bool(flags & 2),
+                "text": text,
+            }
+        )
+    return {"elements": elements}
+
+
 def decode_diff(payload: bytes) -> dict[int, str]:
     count = payload[0]
     values: dict[int, str] = {}

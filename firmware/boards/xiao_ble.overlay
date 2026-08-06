@@ -12,10 +12,18 @@
  *
  * XIAO D-pin -> nRF52840 GPIO (Seeed's standard XIAO BLE pinout):
  *   D0 = P0.02   D1 = P0.03   D2 = P0.28   D3 = P0.29
+ *   D4 = P0.04   D5 = P0.05   D6 = P1.11   D7 = P1.12
  *   D8 = P1.13   D9 = P1.14   D10 = P1.15
  *
  * ePaper Driver Board pin table (Seeed wiki, V2 board):
  *   RST=D0  CS=D1  BUSY=D2  DC=D3  SCK=D8  MOSI=D10
+ *
+ * Checklist row buttons (this feature): D4, D5, D6, D7, D9 are the only pins the
+ * ePaper board and battery ADC leave free — wired one per row, active-low to GND with
+ * the SoC's internal pull-up (see `buttons` node below). D4-D7's GPIO numbers above are
+ * transcribed from Seeed's published XIAO nRF52840 pinout diagram, not yet cross-checked
+ * against a physical board the way D0-D3/D8-D10 were for the ePaper wiring — verify
+ * against the actual board silkscreen before wiring real buttons.
  *
  * Battery sense (documented on the Seeed forum for XIAO nRF52840): P0.31 is AIN7, the
  * ADC input for the VBAT divider; P0.14 is the divider's active-low enable pin. See
@@ -84,5 +92,23 @@
 		rst-gpios = <&gpio0 2 GPIO_ACTIVE_LOW>;    /* D0 */
 		busy-gpios = <&gpio0 28 GPIO_ACTIVE_HIGH>; /* D2 — datasheet: high = busy */
 		battery-enable-gpios = <&gpio0 14 GPIO_ACTIVE_LOW>; /* low = divider enabled */
+
+		/* One tactile button per checklist row (up to 5, the number of free GPIOs —
+		 * see header comment). Each ties its pin to GND when pressed; ACTIVE_LOW +
+		 * PULL_UP means the pin reads high (inactive) via the SoC's internal pull-up
+		 * when open. The pin's own edge interrupt (configured in button.c, not here)
+		 * is what wakes the SoC from DEEP_SLEEP — no separate "wakeup-source"
+		 * devicetree property is needed because this firmware sleeps in Zephyr's
+		 * deepest *System ON* low-power state, not System OFF, and GPIO interrupts
+		 * already wake the CPU for free from there (see prj.conf's comment on why
+		 * System OFF was deliberately avoided). Named individually (not a `gpios`
+		 * array, and not `gpio-keys` + CONFIG_INPUT) to keep each one a plain
+		 * GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), row0_button_gpios)-style spec in
+		 * button.c, matching every other pin in this node. */
+		row0-button-gpios = <&gpio0 4 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;  /* D4 */
+		row1-button-gpios = <&gpio0 5 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;  /* D5 */
+		row2-button-gpios = <&gpio1 11 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>; /* D6 */
+		row3-button-gpios = <&gpio1 12 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>; /* D7 */
+		row4-button-gpios = <&gpio1 14 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>; /* D9 */
 	};
 };

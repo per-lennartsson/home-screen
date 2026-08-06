@@ -13,7 +13,15 @@ cd "$(dirname "$0")"
 
 cc -std=c11 -Wall -Wextra \
   -I ../src -I shims \
-  ../src/chunk_protocol.c ../src/epaper.c native_epd_stub.c test_chunk_protocol.c \
+  ../src/chunk_protocol.c ../src/epaper.c ../src/layout_store.c ../src/rasterizer.c \
+  native_epd_stub.c test_chunk_protocol.c \
   -o /tmp/chunk_protocol_native_test
 
 /tmp/chunk_protocol_native_test
+
+cc -std=c11 -Wall -Wextra \
+  -I ../src -I shims \
+  ../src/chunk_protocol.c ../src/layout_store.c test_layout_store.c \
+  -o /tmp/layout_store_native_test
+
+/tmp/layout_store_native_test

@@ -25,6 +25,13 @@ class BackendClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def report_button_event(self, display_id: int, button_mask: int) -> dict:
+        resp = await self._client.post(
+            f"/api/displays/{display_id}/button-event", json={"button_mask": button_mask}
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     async def get_payload(self, display_id: int) -> dict:
         resp = await self._client.get(f"/api/displays/{display_id}/payload")
         resp.raise_for_status()

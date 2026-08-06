@@ -5,8 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.db import ContentCache, Design, Display, Gateway
+from app.models.db import ContentCache, Design, Display, ElementLiveValue, Gateway
 from app.schemas.display import (
+    ButtonEventReport,
     DisplayAssign,
     DisplayCreate,
     DisplayGatewayAssign,
@@ -16,7 +17,7 @@ from app.schemas.display import (
     PayloadFull,
     PayloadInSync,
 )
-from app.services.rendering import build_value_diff, recompute_desired_hashes
+from app.services.rendering import build_value_diff, find_button_element, recompute_desired_hashes
 
 router = APIRouter(prefix="/api/displays", tags=["displays"])
 
@@ -104,6 +105,43 @@ async def report_status(display_id: int, payload: DisplayStatusReport, db: Sessi
     display.battery_mv = payload.battery_mv
     display.last_seen_at = datetime.now(timezone.utc)
     db.commit()
+    db.refresh(display)
+    return display
+
+
+@router.post("/{display_id}/button-event", response_model=DisplayOut)
+async def report_button_event(display_id: int, payload: ButtonEventReport, db: Session = Depends(get_db)):
+    """Gateway calls this right after reading the device's button_event characteristic
+    (Section 5.1 step 4, extended) - deliberately before GET /payload in the gateway's
+    per-connection sequence, so the same connection's payload already reflects the
+    toggle instead of waiting a full extra wake cycle."""
+    display = db.get(Display, display_id)
+    if display is None:
+        raise HTTPException(status_code=404, detail="display not found")
+    if display.design_id is None:
+        raise HTTPException(status_code=409, detail="display has no design assigned")
+    design = db.get(Design, display.design_id)
+
+    changed = False
+    for bit in range(5):
+        if not (payload.button_mask & (1 << bit)):
+            continue
+        element = find_button_element(design, bit)
+        if element is None:
+            continue  # no row on this design bound to this physical button - ignore
+        element_id = element["id"]
+        row = db.get(ElementLiveValue, (design.id, element_id))
+        currently_checked = row is not None and row.value == "checked"
+        new_value = "unchecked" if currently_checked else "checked"
+        if row is None:
+            db.add(ElementLiveValue(design_id=design.id, element_id=element_id, value=new_value))
+        else:
+            row.value = new_value
+        changed = True
+
+    if changed:
+        db.commit()
+        recompute_desired_hashes(db, design)
     db.refresh(display)
     return display
 

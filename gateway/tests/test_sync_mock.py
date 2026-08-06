@@ -13,6 +13,7 @@ calls, and a failed push takes three (push, discover-still-stale, push again, co
 That's why the tests below drive multiple cycles instead of asserting after one.
 """
 
+from gateway import protocol
 from gateway.backend_client import BackendClient
 from gateway.ble_transport import MockBleTransport, MockDisplay
 from gateway.sync import GatewayService
@@ -76,7 +77,11 @@ async def test_full_sync_brings_mock_display_in_sync(backend_client):
     mid_flight = await _get_display(backend_client, disp["id"])
     assert mid_flight["in_sync"] is False
     assert mock_display.content_hash == mid_flight["desired_content_hash"]  # device already has it
-    assert mock_display.last_rendered == LAYOUT_V1
+    # last_rendered is what MockDisplay decoded from the actual binary wire format
+    # (protocol.encode_full_layout), not the original layout_json — round-tripping
+    # LAYOUT_V1 through encode/decode gives the same lossy-but-normalized shape real
+    # firmware would end up with.
+    assert mock_display.last_rendered == protocol.decode_full_layout(protocol.encode_full_layout(LAYOUT_V1))
 
     # Cycle 2: gateway reads the now-updated status and reports it -> confirmed in sync.
     await service.handle_advertisement(disp["mac_address"])
@@ -103,7 +108,8 @@ async def test_value_only_change_pushes_diff_not_full(backend_client):
     assert payload["type"] == "diff"  # structure unchanged, only element 2's value differs
 
     await _run_cycles_until_in_sync(service, backend_client, disp["mac_address"], disp["id"])
-    assert mock_display.last_rendered == LAYOUT_V2  # text element untouched, value patched
+    # text element untouched, value patched via the diff path (not a re-sent full layout)
+    assert mock_display.last_rendered == protocol.decode_full_layout(protocol.encode_full_layout(LAYOUT_V2))
 
 
 async def test_corrupted_write_is_retried_and_eventually_confirmed(backend_client):

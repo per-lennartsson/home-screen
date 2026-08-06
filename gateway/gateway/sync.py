@@ -85,6 +85,18 @@ class GatewayService:
                     state.display_id, status["content_hash"], status["battery_pct"], status["battery_mv"]
                 )
 
+                # Read/report a pending button press before fetching the payload — not
+                # after — so if a row was just toggled, the payload this same connection
+                # gets back already reflects it, instead of waiting a full extra wake
+                # cycle for the press to show up on screen. No retry if this fails: the
+                # whole connection aborts via the except below and the next advertisement
+                # retries, same as any other step here (firmware already cleared its
+                # mask on the read regardless — see docs/protocol.md's no-ack model,
+                # same one `status` already uses).
+                button_mask = await conn.read_button_event()
+                if button_mask:
+                    await self.backend.report_button_event(state.display_id, button_mask)
+
                 payload = await self.backend.get_payload(state.display_id)
                 if payload.get("in_sync"):
                     state.pending = False
@@ -108,7 +120,10 @@ class GatewayService:
 
     async def _push_payload(self, conn: BleConnection, payload: dict) -> None:
         if payload["type"] == "full":
-            data_bytes = protocol.canonical_json_bytes(payload["data"])
+            # Firmware has no JSON parser (docs/protocol.md) — encode_full_layout is
+            # the flat binary format it actually decodes, not the backend's canonical
+            # JSON snapshot.
+            data_bytes = protocol.encode_full_layout(payload["data"])
             msg_type = protocol.MSG_TYPE_FULL
         else:
             values = {int(k): v for k, v in payload["data"]["values"].items()}

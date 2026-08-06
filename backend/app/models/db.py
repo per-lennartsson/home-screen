@@ -28,8 +28,12 @@ class Design(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String)
     # {"elements": [{"id": int, "type": "text"|"value"|"image", "x", "y", "w", "h", "props": {...}}]}
-    # "value" elements' props: {"source": "static"|"home_assistant", "value": str (when
-    # static), "entity_id": str, "attribute": str|None (when home_assistant)}.
+    # "value" elements' props: {"source": "static"|"home_assistant"|"button", "value": str
+    # (when static or button - a button element's "value" is its static label text),
+    # "entity_id": str, "attribute": str|None (when home_assistant), "button_index": int
+    # 0-4 (when button - which physical device button toggles this row's checked state,
+    # stored live in ElementLiveValue as "checked"/"unchecked", merged in by
+    # rendering.resolve_layout() into a runtime-only "checked": bool prop).
     # Both "text" and "value" elements' props also carry "fontSize": int (px, at the
     # design's authored resolution) — purely a canvas-preview concern until real ePaper
     # bitmap rendering (Section 7 step 4) exists to read it.
