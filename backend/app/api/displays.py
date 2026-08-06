@@ -9,6 +9,7 @@ from app.models.db import ContentCache, Design, Display, Gateway
 from app.schemas.display import (
     DisplayAssign,
     DisplayCreate,
+    DisplayGatewayAssign,
     DisplayOut,
     DisplayStatusReport,
     PayloadDiff,
@@ -73,6 +74,20 @@ async def assign_design(display_id: int, payload: DisplayAssign, db: Session = D
     display.design_id = design.id
     db.commit()
     recompute_desired_hashes(db, design)
+    db.refresh(display)
+    return display
+
+
+@router.post("/{display_id}/assign-gateway", response_model=DisplayOut)
+async def assign_gateway(display_id: int, payload: DisplayGatewayAssign, db: Session = Depends(get_db)):
+    display = db.get(Display, display_id)
+    if display is None:
+        raise HTTPException(status_code=404, detail="display not found")
+    if db.get(Gateway, payload.gateway_id) is None:
+        raise HTTPException(status_code=404, detail="gateway not found")
+
+    display.gateway_id = payload.gateway_id
+    db.commit()
     db.refresh(display)
     return display
 

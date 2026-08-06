@@ -24,6 +24,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ design_id: designId }),
     }),
+  assignGateway: (displayId, gatewayId) =>
+    request(`/displays/${displayId}/assign-gateway`, {
+      method: "POST",
+      body: JSON.stringify({ gateway_id: gatewayId }),
+    }),
   getPayload: (displayId) => request(`/displays/${displayId}/payload`),
 
   listDesigns: () => request("/designs"),

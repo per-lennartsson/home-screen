@@ -1,218 +1,132 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client.js";
+import DesignCanvas, { elementLabel } from "../components/DesignCanvas.jsx";
+import { relativeTime } from "../lib/format.js";
+import { DEFAULT_FONT_SIZE, emptyElement, fromLayoutJson, haEntityRefs, toLayoutJson } from "../lib/layout.js";
+import { entityValueKey, useEntityValues } from "../lib/useEntityValues.js";
 
 const CANVAS_CSS_WIDTH = 480;
 
-const DEFAULT_FONT_SIZE = 16;
-
-function emptyElement() {
-  return {
-    type: "text",
-    x: 10,
-    y: 10,
-    w: 100,
-    h: 20,
-    text: "",
-    source: "static",
-    value: "",
-    entityId: "",
-    attribute: "",
-    fontSize: DEFAULT_FONT_SIZE,
-  };
-}
-
-function toLayoutJson(elements) {
-  return {
-    elements: elements.map((el, i) => {
-      let props;
-      if (el.type === "text") {
-        props = { text: el.text };
-      } else if (el.source === "home_assistant") {
-        props = { source: "home_assistant", entity_id: el.entityId };
-        if (el.attribute) props.attribute = el.attribute;
-      } else {
-        props = { source: "static", value: el.value };
-      }
-      props.fontSize = el.fontSize || DEFAULT_FONT_SIZE;
-      return { id: i + 1, type: el.type, x: el.x, y: el.y, w: el.w, h: el.h, props };
-    }),
-  };
-}
-
-function fromLayoutJson(layout) {
-  return (layout.elements || []).map((el) => ({
-    type: el.type,
-    x: el.x,
-    y: el.y,
-    w: el.w,
-    h: el.h,
-    text: el.props?.text || "",
-    source: el.props?.source || "static",
-    value: el.props?.value || "",
-    entityId: el.props?.entity_id || "",
-    attribute: el.props?.attribute || "",
-    fontSize: el.props?.fontSize || DEFAULT_FONT_SIZE,
-  }));
-}
-
-function entityValueKey(entityId, attribute) {
-  return `${entityId}::${attribute || ""}`;
-}
-
-function elementLabel(el, entityValues) {
-  if (el.type === "text") return el.text || "(empty text)";
-  if (el.source === "home_assistant") {
-    if (!el.entityId) return "⌂ (no entity)";
-    const cached = entityValues[entityValueKey(el.entityId, el.attribute)];
-    if (!cached) return "⌂ …";
-    return cached.error ? `⌂ ${cached.error}` : cached.value;
-  }
-  return el.value || "(empty value)";
-}
-
-function DraggableElement({ element, index, scale, selected, onSelect, onMove, entityValues }) {
-  const dragRef = useRef(null);
-
-  // Window-level mouse/touch listeners rather than pointer capture: works the same for
-  // real users, but doesn't depend on the browser's active-pointer bookkeeping — more
-  // robust against automated/synthetic input, and handles the pointer leaving the
-  // element (or the window) mid-drag without losing the drag.
-  const startDrag = (clientX, clientY, onMoveClient, onEnd) => {
-    onSelect(index);
-    dragRef.current = { startX: clientX, startY: clientY, origX: element.x, origY: element.y };
-
-    const handleMove = (moveClientX, moveClientY) => {
-      if (!dragRef.current) return;
-      const dx = Math.round((moveClientX - dragRef.current.startX) / scale);
-      const dy = Math.round((moveClientY - dragRef.current.startY) / scale);
-      onMove(index, dragRef.current.origX + dx, dragRef.current.origY + dy);
-    };
-    const handleEnd = () => {
-      dragRef.current = null;
-      onEnd();
-    };
-
-    onMoveClient(handleMove, handleEnd);
-  };
-
-  const onMouseDown = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    startDrag(e.clientX, e.clientY, (handleMove, handleEnd) => {
-      const mouseMove = (moveEvent) => handleMove(moveEvent.clientX, moveEvent.clientY);
-      const mouseUp = () => {
-        handleEnd();
-        window.removeEventListener("mousemove", mouseMove);
-        window.removeEventListener("mouseup", mouseUp);
-      };
-      window.addEventListener("mousemove", mouseMove);
-      window.addEventListener("mouseup", mouseUp);
-    });
-  };
-
-  const onTouchStart = (e) => {
-    e.stopPropagation();
-    const touch = e.touches[0];
-    startDrag(touch.clientX, touch.clientY, (handleMove, handleEnd) => {
-      const touchMove = (moveEvent) => {
-        moveEvent.preventDefault();
-        handleMove(moveEvent.touches[0].clientX, moveEvent.touches[0].clientY);
-      };
-      const touchEnd = () => {
-        handleEnd();
-        window.removeEventListener("touchmove", touchMove);
-        window.removeEventListener("touchend", touchEnd);
-      };
-      window.addEventListener("touchmove", touchMove, { passive: false });
-      window.addEventListener("touchend", touchEnd);
-    });
-  };
-
-  return (
-    <div
-      className={`canvas-element ${element.type}${selected ? " selected" : ""}`}
-      style={{
-        left: element.x * scale,
-        top: element.y * scale,
-        width: element.w * scale,
-        height: element.h * scale,
-        fontSize: (element.fontSize || DEFAULT_FONT_SIZE) * scale,
-      }}
-      onMouseDown={onMouseDown}
-      onTouchStart={onTouchStart}
-    >
-      {elementLabel(element, entityValues)}
-    </div>
-  );
+function snapshotOf(name, width, height, elements) {
+  return JSON.stringify({ name, width, height, elements });
 }
 
 export default function DesignsPage() {
   const [designs, setDesigns] = useState([]);
+  const [displays, setDisplays] = useState([]);
+  const [error, setError] = useState(null);
+  const [view, setView] = useState("list");
+
+  const [editingId, setEditingId] = useState(null);
   const [name, setName] = useState("");
   const [width, setWidth] = useState(400);
   const [height, setHeight] = useState(300);
   const [elements, setElements] = useState([]);
+  const [snapshot, setSnapshot] = useState(snapshotOf("", 400, 300, []));
   const [selectedIndex, setSelectedIndex] = useState(null);
-  const [draft, setDraft] = useState(emptyElement());
-  const [error, setError] = useState(null);
-  const [editingId, setEditingId] = useState(null);
-  const [preview, setPreview] = useState(null);
-  const [previewing, setPreviewing] = useState(false);
-  const [entityValues, setEntityValues] = useState({});
+  const [snap, setSnap] = useState(true);
+  const [editorTab, setEditorTab] = useState("edit");
 
-  const refresh = () => api.listDesigns().then(setDesigns).catch((e) => setError(e.message));
+  const refresh = () => {
+    api.listDesigns().then(setDesigns).catch((e) => setError(e.message));
+    api.listDisplays().then(setDisplays).catch(() => {});
+  };
 
   useEffect(() => {
     refresh();
   }, []);
 
-  // Canvas labels for HA-bound elements show the live value (matching what actually
-  // renders on the device, see rendering.resolve_layout) rather than the entity_id, which
-  // is often too long to fit the element's box. Debounced so editing an entity_id field
-  // doesn't fire a request per keystroke.
-  useEffect(() => {
-    const haElements = elements.filter((el) => el.type === "value" && el.source === "home_assistant" && el.entityId);
-    const missing = haElements.filter((el) => !(entityValueKey(el.entityId, el.attribute) in entityValues));
-    if (missing.length === 0) return;
+  const entityRefs = useMemo(() => haEntityRefs(elements), [elements]);
+  const [entityValues] = useEntityValues(entityRefs);
 
-    const timer = setTimeout(() => {
-      missing.forEach((el) => {
-        const key = entityValueKey(el.entityId, el.attribute);
-        api
-          .previewEntity(el.entityId, el.attribute || undefined)
-          .then((result) =>
-            setEntityValues((prev) => ({
-              ...prev,
-              [key]: result.error ? { error: result.error } : { value: result.value },
-            }))
-          )
-          .catch((e) => setEntityValues((prev) => ({ ...prev, [key]: { error: e.message } })));
-      });
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [elements, entityValues]);
-
+  const dirty = snapshotOf(name, width, height, elements) !== snapshot;
   const scale = CANVAS_CSS_WIDTH / (width || 400);
-  const canvasCssHeight = (height || 300) * scale;
 
-  const addElement = () => {
-    setElements([...elements, draft]);
-    setDraft(emptyElement());
-    setPreview(null);
+  const openNew = () => {
+    setEditingId(null);
+    setName("");
+    setWidth(400);
+    setHeight(300);
+    setElements([]);
+    setSnapshot(snapshotOf("", 400, 300, []));
+    setSelectedIndex(null);
+    setEditorTab("edit");
+    setView("editor");
+  };
+
+  const openEdit = (design) => {
+    const els = fromLayoutJson(design.layout_json);
+    setEditingId(design.id);
+    setName(design.name);
+    setWidth(design.width);
+    setHeight(design.height);
+    setElements(els);
+    setSnapshot(snapshotOf(design.name, design.width, design.height, els));
+    setSelectedIndex(null);
+    setEditorTab("edit");
+    setView("editor");
+  };
+
+  const backToList = () => {
+    if (dirty && !window.confirm("Discard unsaved changes to this design?")) return;
+    setView("list");
+    refresh();
+  };
+
+  const discard = () => {
+    const parsed = JSON.parse(snapshot);
+    setName(parsed.name);
+    setWidth(parsed.width);
+    setHeight(parsed.height);
+    setElements(parsed.elements);
+    setSelectedIndex(null);
+  };
+
+  const save = async () => {
+    setError(null);
+    try {
+      const payload = { name, width, height, layout_json: toLayoutJson(elements) };
+      let saved;
+      if (editingId) {
+        saved = await api.updateDesign(editingId, payload);
+      } else {
+        saved = await api.createDesign(payload);
+      }
+      setEditingId(saved.id);
+      setSnapshot(snapshotOf(name, width, height, elements));
+      refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  const addElement = (type) => {
+    const el = { ...emptyElement(), type };
+    setElements((prev) => {
+      setSelectedIndex(prev.length);
+      return [...prev, el];
+    });
   };
 
   const removeElement = (index) => {
-    setElements(elements.filter((_, i) => i !== index));
+    setElements((prev) => prev.filter((_, i) => i !== index));
     if (selectedIndex === index) setSelectedIndex(null);
+    else if (selectedIndex != null && index < selectedIndex) setSelectedIndex(selectedIndex - 1);
   };
 
   const moveElement = (index, x, y) => {
     setElements((prev) => {
       const next = [...prev];
       const el = next[index];
-      const clampedX = Math.max(0, Math.min(x, width - el.w));
-      const clampedY = Math.max(0, Math.min(y, height - el.h));
-      next[index] = { ...el, x: clampedX, y: clampedY };
+      let nx = x;
+      let ny = y;
+      if (snap) {
+        nx = Math.round(nx / 4) * 4;
+        ny = Math.round(ny / 4) * 4;
+      }
+      nx = Math.max(0, Math.min(nx, width - el.w));
+      ny = Math.max(0, Math.min(ny, height - el.h));
+      next[index] = { ...el, x: nx, y: ny };
       return next;
     });
   };
@@ -226,325 +140,390 @@ export default function DesignsPage() {
     });
   };
 
-  const resetForm = () => {
-    setEditingId(null);
-    setName("");
-    setWidth(400);
-    setHeight(300);
-    setElements([]);
-    setSelectedIndex(null);
-  };
-
-  const save = async () => {
-    setError(null);
-    try {
-      const payload = { name, width, height, layout_json: toLayoutJson(elements) };
-      if (editingId) {
-        await api.updateDesign(editingId, payload);
-      } else {
-        await api.createDesign(payload);
-      }
-      resetForm();
-      refresh();
-    } catch (e) {
-      setError(e.message);
-    }
-  };
-
-  const edit = (design) => {
-    setEditingId(design.id);
-    setName(design.name);
-    setWidth(design.width);
-    setHeight(design.height);
-    setElements(fromLayoutJson(design.layout_json));
-    setSelectedIndex(null);
-  };
-
-  const previewEntity = async () => {
-    if (!draft.entityId) return;
-    setPreviewing(true);
-    setPreview(null);
-    try {
-      const result = await api.previewEntity(draft.entityId, draft.attribute || undefined);
-      setPreview(result);
-      const key = entityValueKey(draft.entityId, draft.attribute);
-      setEntityValues((prev) => ({
-        ...prev,
-        [key]: result.error ? { error: result.error } : { value: result.value },
-      }));
-    } catch (e) {
-      setPreview({ error: e.message });
-    } finally {
-      setPreviewing(false);
-    }
+  const align = (edge) => {
+    if (selectedIndex === null) return;
+    const el = elements[selectedIndex];
+    let x;
+    if (edge === "left") x = 0;
+    else if (edge === "right") x = width - el.w;
+    else x = Math.round((width - el.w) / 2);
+    updateSelected({ x: Math.max(0, x) });
   };
 
   const selected = selectedIndex !== null ? elements[selectedIndex] : null;
+  const usedByCount = editingId ? displays.filter((d) => d.design_id === editingId).length : 0;
+
+  if (view === "list") {
+    return (
+      <>
+        <header className="page-header">
+          <div className="page-header-titles">
+            <h1>Designs</h1>
+            <span className="page-header-meta">
+              {designs.length} design{designs.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="page-header-actions">
+            <button type="button" className="btn" onClick={openNew}>
+              New design
+            </button>
+          </div>
+        </header>
+        <div className="page-body">
+          {error && <div className="error">{error}</div>}
+          <div className="card-grid narrow">
+            {designs.map((d) => (
+              <div key={d.id} className="entity-card">
+                <div className="entity-card-head">
+                  <div>
+                    <div className="entity-card-title">{d.name}</div>
+                    <div className="entity-card-sub">
+                      {d.width}×{d.height} · {(d.layout_json.elements || []).length} element
+                      {(d.layout_json.elements || []).length === 1 ? "" : "s"}
+                    </div>
+                  </div>
+                </div>
+                <div className="card-stats" style={{ marginTop: 0 }}>
+                  <div>
+                    <div className="card-stat-label">Updated</div>
+                    <div className="card-stat-value">{relativeTime(d.updated_at)}</div>
+                  </div>
+                </div>
+                <div className="entity-card-footer">
+                  <button type="button" className="btn secondary small" onClick={() => openEdit(d)}>
+                    Edit
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          {designs.length === 0 && <div className="muted">No designs yet.</div>}
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
-      <h2>Designs</h2>
-      {error && <div className="error">{error}</div>}
-
-      <div className="card">
-        <div className="row">
-          <div className="field">
-            <label>Design name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. desk-status" />
-          </div>
-          <div className="field">
-            <label>Canvas width</label>
-            <input type="number" value={width} onChange={(e) => setWidth(+e.target.value)} style={{ width: 70 }} />
-          </div>
-          <div className="field">
-            <label>Canvas height</label>
-            <input type="number" value={height} onChange={(e) => setHeight(+e.target.value)} style={{ width: 70 }} />
-          </div>
-          <div className="muted">400×300 matches the only panel this system currently drives.</div>
+      <header className="page-header">
+        <div className="breadcrumb">
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              backToList();
+            }}
+          >
+            Designs
+          </a>
+          <span className="breadcrumb-sep">/</span>
+          <input className="name-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="design name" />
+          <span className="chip">
+            {width} × {height}
+          </span>
         </div>
+        <div className="page-header-actions">
+          {dirty && <span className="unsaved-flag">Unsaved changes</span>}
+          <button type="button" className="btn ghost" onClick={discard} disabled={!dirty}>
+            Discard
+          </button>
+          <button type="button" className="btn" onClick={save} disabled={!name || elements.length === 0}>
+            Save &amp; push
+          </button>
+        </div>
+      </header>
 
-        <div className="row" style={{ alignItems: "flex-start", gap: 24 }}>
-          <div style={{ flex: 1 }}>
-            <div className="row">
-              <div className="field">
-                <label>Type</label>
-                <select value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })}>
-                  <option value="text">text (static)</option>
-                  <option value="value">value (bound)</option>
-                </select>
-              </div>
-              {draft.type === "value" && (
-                <div className="field">
-                  <label>Source</label>
-                  <select value={draft.source} onChange={(e) => setDraft({ ...draft, source: e.target.value })}>
-                    <option value="static">static text</option>
-                    <option value="home_assistant">Home Assistant entity</option>
-                  </select>
-                </div>
-              )}
-            </div>
+      {error && (
+        <div className="error" style={{ padding: "8px 28px 0" }}>
+          {error}
+        </div>
+      )}
 
-            {draft.type === "text" && (
-              <div className="field">
-                <label>Text</label>
-                <input value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} />
-              </div>
-            )}
-
-            {draft.type === "value" && draft.source === "static" && (
-              <div className="field">
-                <label>Value</label>
-                <input value={draft.value} onChange={(e) => setDraft({ ...draft, value: e.target.value })} />
-              </div>
-            )}
-
-            {draft.type === "value" && draft.source === "home_assistant" && (
-              <>
-                <div className="row">
-                  <div className="field">
-                    <label>Entity ID</label>
-                    <input
-                      value={draft.entityId}
-                      onChange={(e) => setDraft({ ...draft, entityId: e.target.value })}
-                      placeholder="sensor.living_room_temperature"
-                    />
-                  </div>
-                  <div className="field">
-                    <label>Attribute (optional)</label>
-                    <input
-                      value={draft.attribute}
-                      onChange={(e) => setDraft({ ...draft, attribute: e.target.value })}
-                      placeholder="defaults to state"
-                    />
-                  </div>
-                  <button type="button" className="secondary" onClick={previewEntity} disabled={!draft.entityId || previewing}>
-                    {previewing ? "Checking…" : "Preview"}
-                  </button>
-                </div>
-                {preview &&
-                  (preview.error ? (
-                    <div className="error">{preview.error}</div>
-                  ) : (
-                    <div className="muted">Current value: {preview.value}</div>
-                  ))}
-              </>
-            )}
-
-            <div className="row">
-              <div className="field">
-                <label>x</label>
-                <input type="number" value={draft.x} onChange={(e) => setDraft({ ...draft, x: +e.target.value })} style={{ width: 60 }} />
-              </div>
-              <div className="field">
-                <label>y</label>
-                <input type="number" value={draft.y} onChange={(e) => setDraft({ ...draft, y: +e.target.value })} style={{ width: 60 }} />
-              </div>
-              <div className="field">
-                <label>w</label>
-                <input type="number" value={draft.w} onChange={(e) => setDraft({ ...draft, w: +e.target.value })} style={{ width: 60 }} />
-              </div>
-              <div className="field">
-                <label>h</label>
-                <input type="number" value={draft.h} onChange={(e) => setDraft({ ...draft, h: +e.target.value })} style={{ width: 60 }} />
-              </div>
-              <div className="field">
-                <label>Font size</label>
-                <input
-                  type="number"
-                  min={8}
-                  max={72}
-                  value={draft.fontSize}
-                  onChange={(e) => setDraft({ ...draft, fontSize: +e.target.value })}
-                  style={{ width: 60 }}
-                />
-              </div>
-              <button type="button" className="secondary" onClick={addElement}>
-                Add element
-              </button>
-            </div>
-
-            <ul style={{ paddingLeft: 16, fontSize: 13 }}>
-              {elements.map((el, i) => (
-                <li
+      <div className="editor-shell">
+        <aside className="editor-aside-left">
+          <div className="editor-add-row">
+            <button type="button" className="btn secondary small" onClick={() => addElement("text")}>
+              ＋ Text
+            </button>
+            <button type="button" className="btn secondary small" onClick={() => addElement("value")}>
+              ＋ Value
+            </button>
+          </div>
+          <div className="sidebar-section-label">Layers</div>
+          <div className="layers-list">
+            {elements.map((el, i) => {
+              const cached =
+                el.type === "value" && el.source === "home_assistant" && el.entityId
+                  ? entityValues[entityValueKey(el.entityId, el.attribute)]
+                  : null;
+              return (
+                <div
                   key={i}
+                  className={`layer-item${i === selectedIndex ? " selected" : ""}`}
                   onClick={() => setSelectedIndex(i)}
-                  style={{ cursor: "pointer", fontWeight: i === selectedIndex ? 600 : 400 }}
                 >
-                  {el.type} "{elementLabel(el, entityValues)}" @ ({el.x},{el.y})
+                  <span className={`layer-icon${cached?.error ? " warn" : ""}`}>{el.type === "text" ? "T" : "◈"}</span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="layer-title">{elementLabel(el, entityValues)}</div>
+                    {el.type === "value" && el.source === "home_assistant" ? (
+                      <div className="layer-sub">{el.entityId || "no entity"}</div>
+                    ) : (
+                      <div className="layer-sub">{el.type === "text" ? "Static text" : "Static value"}</div>
+                    )}
+                  </div>
                   <button
                     type="button"
-                    className="secondary"
-                    style={{ marginLeft: 8, padding: "2px 6px" }}
+                    className="btn ghost"
+                    style={{ padding: "2px 6px" }}
                     onClick={(e) => {
                       e.stopPropagation();
                       removeElement(i);
                     }}
                   >
-                    remove
+                    ✕
                   </button>
-                </li>
-              ))}
-            </ul>
+                </div>
+              );
+            })}
+            {elements.length === 0 && <div className="muted" style={{ padding: "8px 9px" }}>No elements yet.</div>}
+          </div>
+        </aside>
 
-            {selected && (
-              <div className="card">
-                <div className="muted" style={{ marginBottom: 6 }}>
-                  Editing selected element — drag it on the canvas to reposition
-                </div>
-                {selected.type === "text" ? (
-                  <div className="field">
-                    <label>Text</label>
-                    <input value={selected.text} onChange={(e) => updateSelected({ text: e.target.value })} />
-                  </div>
-                ) : selected.source === "static" ? (
-                  <div className="field">
-                    <label>Value</label>
-                    <input value={selected.value} onChange={(e) => updateSelected({ value: e.target.value })} />
-                  </div>
-                ) : (
-                  <div className="field">
-                    <label>Entity ID</label>
-                    <input value={selected.entityId} onChange={(e) => updateSelected({ entityId: e.target.value })} />
-                  </div>
-                )}
-                <div className="row">
-                  <div className="field">
-                    <label>w</label>
-                    <input type="number" value={selected.w} onChange={(e) => updateSelected({ w: +e.target.value })} style={{ width: 60 }} />
-                  </div>
-                  <div className="field">
-                    <label>h</label>
-                    <input type="number" value={selected.h} onChange={(e) => updateSelected({ h: +e.target.value })} style={{ width: 60 }} />
-                  </div>
-                  <div className="field">
-                    <label>Font size</label>
-                    <input
-                      type="number"
-                      min={8}
-                      max={72}
-                      value={selected.fontSize || DEFAULT_FONT_SIZE}
-                      onChange={(e) => updateSelected({ fontSize: +e.target.value })}
-                      style={{ width: 60 }}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
+        <div className="editor-canvas-area">
+          <div className="editor-toolbar">
+            <div className="tabbar" style={{ flexShrink: 0, width: "auto" }}>
+              <button type="button" className={`tab${editorTab === "edit" ? " active" : ""}`} onClick={() => setEditorTab("edit")}>
+                Edit
+              </button>
+              <button type="button" className={`tab${editorTab === "preview" ? " active" : ""}`} onClick={() => setEditorTab("preview")}>
+                Preview
+              </button>
+            </div>
+            <div className="editor-toolbar-info">
+              <label className="snap-toggle">
+                <input type="checkbox" checked={snap} onChange={(e) => setSnap(e.target.checked)} />
+                Snap to 4 px grid
+              </label>
+              <span className="sep">|</span>
+              <span>Live values from Home Assistant</span>
+            </div>
           </div>
 
-          <div>
-            <div className="muted" style={{ marginBottom: 6 }}>
-              Live preview ({width}×{height}) — drag elements to reposition
-            </div>
-            <div
-              className="canvas-preview"
-              style={{ width: CANVAS_CSS_WIDTH, height: canvasCssHeight }}
-              onMouseDown={() => setSelectedIndex(null)}
-            >
-              {elements.map((el, i) => (
-                <DraggableElement
-                  key={i}
-                  element={el}
-                  index={i}
-                  scale={scale}
-                  selected={i === selectedIndex}
-                  onSelect={setSelectedIndex}
-                  onMove={moveElement}
+          <div className="canvas-scroll">
+            <div>
+              <div className="canvas-frame">
+                <DesignCanvas
+                  elements={elements}
+                  width={width}
+                  height={height}
+                  cssWidth={CANVAS_CSS_WIDTH}
                   entityValues={entityValues}
+                  interactive={editorTab === "edit"}
+                  selectedIndex={selectedIndex}
+                  onSelectIndex={setSelectedIndex}
+                  onMoveElement={moveElement}
                 />
-              ))}
+              </div>
+              <div className="canvas-meta-row">
+                <span>
+                  {width} × {height} px · 1-bit greyscale
+                  {editingId ? ` · used by ${usedByCount} display${usedByCount === 1 ? "" : "s"}` : " · not saved yet"}
+                </span>
+                <span>Shown at {Math.round(scale * 100)}%</span>
+              </div>
             </div>
           </div>
         </div>
 
-        <button type="button" onClick={save} disabled={!name || elements.length === 0} style={{ marginTop: 12 }}>
-          {editingId ? "Save changes" : "Create design"}
-        </button>
-        {editingId && (
-          <button type="button" className="secondary" style={{ marginLeft: 8 }} onClick={resetForm}>
-            Cancel edit
-          </button>
-        )}
-      </div>
+        <aside className="editor-aside-right">
+          {!selected ? (
+            <div className="muted" style={{ padding: 16 }}>
+              Select an element to edit its properties, or add one from the left.
+            </div>
+          ) : (
+            <>
+              <div className="inspector-head">
+                <div className="inspector-head-title">{selected.type === "text" ? "Text element" : "Value element"}</div>
+                <button type="button" className="btn ghost" onClick={() => removeElement(selectedIndex)}>
+                  Delete
+                </button>
+              </div>
 
-      <div className="card">
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Name</th>
-              <th>Resolution</th>
-              <th>Elements</th>
-              <th>Updated</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {designs.map((d) => (
-              <tr key={d.id}>
-                <td>{d.id}</td>
-                <td>{d.name}</td>
-                <td>
-                  {d.width}×{d.height}
-                </td>
-                <td>{(d.layout_json.elements || []).length}</td>
-                <td>{new Date(d.updated_at).toLocaleString()}</td>
-                <td>
-                  <button type="button" className="secondary" onClick={() => edit(d)}>
-                    Edit
+              {selected.type === "text" ? (
+                <div className="inspector-section">
+                  <div className="inspector-label">Content</div>
+                  <input value={selected.text} onChange={(e) => updateSelected({ text: e.target.value })} />
+                </div>
+              ) : (
+                <div className="inspector-section">
+                  <div className="inspector-label">Source</div>
+                  <div className="tabbar">
+                    <button
+                      type="button"
+                      className={`tab${selected.source === "static" ? " active" : ""}`}
+                      onClick={() => updateSelected({ source: "static" })}
+                    >
+                      Static
+                    </button>
+                    <button
+                      type="button"
+                      className={`tab${selected.source === "home_assistant" ? " active" : ""}`}
+                      onClick={() => updateSelected({ source: "home_assistant" })}
+                    >
+                      Home Assistant
+                    </button>
+                  </div>
+
+                  {selected.source === "static" ? (
+                    <div className="field" style={{ marginBottom: 0 }}>
+                      <label>Value</label>
+                      <input value={selected.value} onChange={(e) => updateSelected({ value: e.target.value })} />
+                    </div>
+                  ) : (
+                    <>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label>Entity</label>
+                        <input
+                          className="entity-lookup"
+                          value={selected.entityId}
+                          onChange={(e) => updateSelected({ entityId: e.target.value })}
+                          placeholder="sensor.study_temperature"
+                        />
+                      </div>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label>Attribute (optional)</label>
+                        <input
+                          value={selected.attribute}
+                          onChange={(e) => updateSelected({ attribute: e.target.value })}
+                          placeholder="defaults to state"
+                        />
+                      </div>
+                      {selected.entityId &&
+                        (() => {
+                          const cached = entityValues[entityValueKey(selected.entityId, selected.attribute)];
+                          if (!cached) return <div className="inspector-live">Checking…</div>;
+                          if (cached.error) return <div className="error" style={{ margin: 0 }}>{cached.error}</div>;
+                          return (
+                            <div className="inspector-live">
+                              <span className="status-dot ok" />
+                              <span>
+                                Reads {cached.value} · updated {relativeTime(cached.fetchedAt)}
+                              </span>
+                            </div>
+                          );
+                        })()}
+                    </>
+                  )}
+                </div>
+              )}
+
+              <div className="inspector-section">
+                <div className="inspector-label">Position &amp; size</div>
+                <div className="pos-grid">
+                  <div className="pos-field">
+                    <span className="axis">X</span>
+                    <input type="number" value={selected.x} onChange={(e) => updateSelected({ x: +e.target.value })} />
+                  </div>
+                  <div className="pos-field">
+                    <span className="axis">Y</span>
+                    <input type="number" value={selected.y} onChange={(e) => updateSelected({ y: +e.target.value })} />
+                  </div>
+                  <div className="pos-field">
+                    <span className="axis">W</span>
+                    <input type="number" value={selected.w} onChange={(e) => updateSelected({ w: +e.target.value })} />
+                  </div>
+                  <div className="pos-field">
+                    <span className="axis">H</span>
+                    <input type="number" value={selected.h} onChange={(e) => updateSelected({ h: +e.target.value })} />
+                  </div>
+                </div>
+                <div className="align-row">
+                  <button type="button" className="btn secondary small" onClick={() => align("left")}>
+                    Left
                   </button>
-                </td>
-              </tr>
-            ))}
-            {designs.length === 0 && (
-              <tr>
-                <td colSpan={6} className="muted">
-                  No designs yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                  <button type="button" className="btn secondary small" onClick={() => align("centre")}>
+                    Centre
+                  </button>
+                  <button type="button" className="btn secondary small" onClick={() => align("right")}>
+                    Right
+                  </button>
+                </div>
+              </div>
+
+              <div className="inspector-section">
+                <div className="inspector-label">Type</div>
+                <div className="inspector-row">
+                  <label className="muted">Size</label>
+                  <div className="stepper">
+                    <button type="button" onClick={() => updateSelected({ fontSize: Math.max(8, (selected.fontSize || DEFAULT_FONT_SIZE) - 2) })}>
+                      −
+                    </button>
+                    <span className="value">{selected.fontSize || DEFAULT_FONT_SIZE}</span>
+                    <button type="button" onClick={() => updateSelected({ fontSize: Math.min(72, (selected.fontSize || DEFAULT_FONT_SIZE) + 2) })}>
+                      ＋
+                    </button>
+                  </div>
+                </div>
+                <div className="inspector-row">
+                  <label className="muted">Weight</label>
+                  <div className="tabbar">
+                    <button type="button" className={`tab${!selected.bold ? " active" : ""}`} onClick={() => updateSelected({ bold: false })}>
+                      Regular
+                    </button>
+                    <button type="button" className={`tab${selected.bold ? " active" : ""}`} onClick={() => updateSelected({ bold: true })}>
+                      Bold
+                    </button>
+                  </div>
+                </div>
+                <div className="inspector-row">
+                  <label className="muted">Align</label>
+                  <div className="tabbar">
+                    <button
+                      type="button"
+                      className={`tab${(selected.align || "left") === "left" ? " active" : ""}`}
+                      onClick={() => updateSelected({ align: "left" })}
+                    >
+                      Left
+                    </button>
+                    <button
+                      type="button"
+                      className={`tab${selected.align === "center" ? " active" : ""}`}
+                      onClick={() => updateSelected({ align: "center" })}
+                    >
+                      Center
+                    </button>
+                    <button
+                      type="button"
+                      className={`tab${selected.align === "right" ? " active" : ""}`}
+                      onClick={() => updateSelected({ align: "right" })}
+                    >
+                      Right
+                    </button>
+                  </div>
+                </div>
+                <div className="inspector-row">
+                  <label className="muted">Style</label>
+                  <div className="tabbar">
+                    <button
+                      type="button"
+                      className={`tab${selected.underline ? " active" : ""}`}
+                      onClick={() => updateSelected({ underline: !selected.underline })}
+                    >
+                      Underline
+                    </button>
+                    <button
+                      type="button"
+                      className={`tab${selected.strikethrough ? " active" : ""}`}
+                      onClick={() => updateSelected({ strikethrough: !selected.strikethrough })}
+                    >
+                      Strikethrough
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </aside>
       </div>
     </>
   );

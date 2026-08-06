@@ -16,6 +16,10 @@ class DisplayAssign(BaseModel):
     design_id: int
 
 
+class DisplayGatewayAssign(BaseModel):
+    gateway_id: int
+
+
 class DisplayStatusReport(BaseModel):
     content_hash: int
     battery_pct: int
