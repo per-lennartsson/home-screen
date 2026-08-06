@@ -1,0 +1,88 @@
+/*
+ * Devicetree overlay for the actual v1 hardware: Seeed Studio XIAO nRF52840 (XIAO BLE)
+ * + ePaper Driver Board for XIAO + a 4.2" 400x300 monochrome eInk panel (SSD1683
+ * controller, e.g. GDEY042T81/T91).
+ *
+ * Untested — written from Seeed's published pin table for the ePaper Driver Board
+ * (wiki.seeedstudio.com/xiao_eink_expansion_board_v2), the standard XIAO nRF52840
+ * D-pin -> nRF52840 GPIO mapping, and the SSD1683 datasheet (Solomon Systech, Rev 1.0,
+ * Jan 2021) for the SPI framing (4-wire SPI: SCL/SDA/D-C#/CS#, MSB first). Verify
+ * against your actual board revision and NCS/Zephyr version before flashing — see
+ * firmware/README.md.
+ *
+ * XIAO D-pin -> nRF52840 GPIO (Seeed's standard XIAO BLE pinout):
+ *   D0 = P0.02   D1 = P0.03   D2 = P0.28   D3 = P0.29
+ *   D8 = P1.13   D9 = P1.14   D10 = P1.15
+ *
+ * ePaper Driver Board pin table (Seeed wiki, V2 board):
+ *   RST=D0  CS=D1  BUSY=D2  DC=D3  SCK=D8  MOSI=D10
+ *
+ * Battery sense (documented on the Seeed forum for XIAO nRF52840): P0.31 is AIN7, the
+ * ADC input for the VBAT divider; P0.14 is the divider's active-low enable pin. See
+ * battery.c for why P0.14 is held low permanently rather than toggled per-read (a
+ * known hardware risk to P0.31 if driven high while configured as an analog input).
+ */
+
+&pinctrl {
+	spi3_epd: spi3_epd {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 1, 13)>,
+				<NRF_PSEL(SPIM_MOSI, 1, 15)>;
+		};
+	};
+};
+
+&spi3 {
+	status = "okay";
+	compatible = "nordic,nrf-spim";
+	pinctrl-0 = <&spi3_epd>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpio0 3 GPIO_ACTIVE_LOW>; /* D1 = CS */
+
+	epd: epd@0 {
+		/* No dedicated Zephyr binding for this panel family exists, so
+		 * epaper.c pulls this as a raw spi_dt_spec (SPI_DT_SPEC_GET) rather
+		 * than through a display-class driver — reg/spi-max-frequency are all
+		 * that macro actually needs. Depending on your Zephyr/NCS version's
+		 * devicetree tooling strictness, an unrecognized `compatible` here may
+		 * warn (usually harmless) or require a matching bindings/*.yaml file
+		 * in this app — add one if your build complains.
+		 */
+		compatible = "vnd,spi-device";
+		reg = <0>;
+		spi-max-frequency = <4000000>; /* conservative; SSD1683 supports more,
+						 * raise once verified on real hardware */
+	};
+};
+
+&adc {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	channel@7 {
+		reg = <7>;
+		zephyr,gain = "ADC_GAIN_1_6";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 40)>;
+		zephyr,input-positive = <NRF_SAADC_AIN7>;
+		zephyr,resolution = <12>;
+	};
+};
+
+/ {
+	/*
+	 * Board-specific GPIO/ADC wiring with no dedicated driver of its own —
+	 * `zephyr,user` is Zephyr's standard place for exactly this (see e.g.
+	 * nRF Connect SDK's own battery-voltage samples for the io-channels half of
+	 * this pattern). Read via DT_PATH(zephyr_user) + GPIO_DT_SPEC_GET /
+	 * ADC_DT_SPEC_GET_BY_IDX in battery.c and epaper.c.
+	 */
+	zephyr_user: zephyr,user {
+		io-channels = <&adc 7>;
+		dc-gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;   /* D3 */
+		rst-gpios = <&gpio0 2 GPIO_ACTIVE_LOW>;    /* D0 */
+		busy-gpios = <&gpio0 28 GPIO_ACTIVE_HIGH>; /* D2 — datasheet: high = busy */
+		battery-enable-gpios = <&gpio0 14 GPIO_ACTIVE_LOW>; /* low = divider enabled */
+	};
+};
