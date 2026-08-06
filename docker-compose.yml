@@ -1,0 +1,31 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app/app
+      - backend_data:/app/data
+    environment:
+      HOMESCREEN_DATA_DIR: /app/data
+    # No --reload here: uvicorn's --reload uses watchfiles, whose Rust inotify watcher
+    # can crash under some sandboxed/nested Docker setups. On a normal host it's safe to
+    # add back — either edit this command or run:
+    #   docker compose run --rm -p 8000:8000 backend uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    # Without it, restart the container to pick up backend code changes:
+    #   docker compose restart backend
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      VITE_BACKEND_URL: http://backend:8000
+    depends_on:
+      - backend
+
+volumes:
+  backend_data:
