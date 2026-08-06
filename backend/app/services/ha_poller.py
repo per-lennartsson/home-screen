@@ -20,7 +20,9 @@ from app.services.rendering import recompute_desired_hashes
 
 logger = logging.getLogger("app.ha_poller")
 
-POLL_INTERVAL_S = float(os.environ.get("HOMESCREEN_HA_POLL_INTERVAL_S", "30"))
+# Only used when no config row exists yet (poll_interval_s is otherwise stored on
+# HomeAssistantConfig and configurable from the Integrations page).
+DEFAULT_POLL_INTERVAL_S = float(os.environ.get("HOMESCREEN_HA_POLL_INTERVAL_S", "30"))
 
 
 def _ha_bound_elements(design: Design) -> list[dict]:
@@ -70,14 +72,17 @@ async def run_poller() -> None:
     misconfigured entity) kill the loop — logs and retries next interval, same
     resilience principle as the gateway's per-device sync loop."""
     while True:
+        interval = DEFAULT_POLL_INTERVAL_S
         try:
             db = SessionLocal()
             try:
                 config = db.get(HomeAssistantConfig, 1)
+                if config:
+                    interval = config.poll_interval_s
                 if config and config.base_url and config.access_token:
                     await poll_once(db, config)
             finally:
                 db.close()
         except Exception:
             logger.exception("unexpected error during Home Assistant poll cycle")
-        await asyncio.sleep(POLL_INTERVAL_S)
+        await asyncio.sleep(interval)

@@ -16,6 +16,19 @@ class Base(DeclarativeBase):
     pass
 
 
+def ensure_schema_additions() -> None:
+    """create_all() only creates missing tables, not missing columns on tables that
+    already exist. This project has no migration framework yet (SQLite, v1, single
+    dev deployment) — patch any columns added to an existing model here so a pre-existing
+    homescreen.db doesn't fail with "no such column" after a code update."""
+    with engine.begin() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(home_assistant_config)")}
+        if cols and "poll_interval_s" not in cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE home_assistant_config ADD COLUMN poll_interval_s INTEGER NOT NULL DEFAULT 30"
+            )
+
+
 async def get_db():
     # async def, not def: FastAPI runs sync generator dependencies through anyio's
     # threadpool, which failed to spawn threads in some Docker environments (see

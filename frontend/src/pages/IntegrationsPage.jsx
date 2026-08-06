@@ -5,6 +5,7 @@ export default function IntegrationsPage() {
   const [config, setConfig] = useState(null);
   const [baseUrl, setBaseUrl] = useState("");
   const [token, setToken] = useState("");
+  const [pollIntervalS, setPollIntervalS] = useState(30);
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(false);
 
@@ -14,6 +15,7 @@ export default function IntegrationsPage() {
       .then((c) => {
         setConfig(c);
         setBaseUrl(c.base_url || "");
+        setPollIntervalS(c.poll_interval_s);
       })
       .catch((e) => setError(e.message));
 
@@ -26,7 +28,11 @@ export default function IntegrationsPage() {
     setError(null);
     setSaved(false);
     try {
-      await api.setHomeAssistantConfig({ base_url: baseUrl, access_token: token || null });
+      await api.setHomeAssistantConfig({
+        base_url: baseUrl,
+        access_token: token || null,
+        poll_interval_s: pollIntervalS,
+      });
       setToken("");
       setSaved(true);
       refresh();
@@ -45,8 +51,8 @@ export default function IntegrationsPage() {
         <p className="muted">
           Value elements can bind to a Home Assistant entity instead of a static value — set the
           connection here, then pick "Home Assistant entity" as the source when adding a value
-          element in the design editor. Polled every <code>HOMESCREEN_HA_POLL_INTERVAL_S</code>{" "}
-          seconds (default 30); changes propagate to displays through the normal full/diff sync.
+          element in the design editor. Polled on the interval below; changes propagate to
+          displays through the normal full/diff sync.
         </p>
         <form onSubmit={save}>
           <div className="field">
@@ -67,6 +73,17 @@ export default function IntegrationsPage() {
               value={token}
               onChange={(e) => setToken(e.target.value)}
               placeholder={config?.token_set ? "••••••••" : "paste a long-lived access token"}
+            />
+          </div>
+          <div className="field">
+            <label>Poll interval (seconds)</label>
+            <input
+              type="number"
+              min={5}
+              max={3600}
+              value={pollIntervalS}
+              onChange={(e) => setPollIntervalS(+e.target.value)}
+              style={{ width: 90 }}
             />
           </div>
           <button type="submit">Save</button>

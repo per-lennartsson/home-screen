@@ -3,6 +3,8 @@ import { api } from "../api/client.js";
 
 const CANVAS_CSS_WIDTH = 480;
 
+const DEFAULT_FONT_SIZE = 16;
+
 function emptyElement() {
   return {
     type: "text",
@@ -15,6 +17,7 @@ function emptyElement() {
     value: "",
     entityId: "",
     attribute: "",
+    fontSize: DEFAULT_FONT_SIZE,
   };
 }
 
@@ -30,6 +33,7 @@ function toLayoutJson(elements) {
       } else {
         props = { source: "static", value: el.value };
       }
+      props.fontSize = el.fontSize || DEFAULT_FONT_SIZE;
       return { id: i + 1, type: el.type, x: el.x, y: el.y, w: el.w, h: el.h, props };
     }),
   };
@@ -47,6 +51,7 @@ function fromLayoutJson(layout) {
     value: el.props?.value || "",
     entityId: el.props?.entity_id || "",
     attribute: el.props?.attribute || "",
+    fontSize: el.props?.fontSize || DEFAULT_FONT_SIZE,
   }));
 }
 
@@ -122,6 +127,7 @@ function DraggableElement({ element, index, scale, selected, onSelect, onMove })
         top: element.y * scale,
         width: element.w * scale,
         height: element.h * scale,
+        fontSize: (element.fontSize || DEFAULT_FONT_SIZE) * scale,
       }}
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
@@ -340,6 +346,17 @@ export default function DesignsPage() {
                 <label>h</label>
                 <input type="number" value={draft.h} onChange={(e) => setDraft({ ...draft, h: +e.target.value })} style={{ width: 60 }} />
               </div>
+              <div className="field">
+                <label>Font size</label>
+                <input
+                  type="number"
+                  min={8}
+                  max={72}
+                  value={draft.fontSize}
+                  onChange={(e) => setDraft({ ...draft, fontSize: +e.target.value })}
+                  style={{ width: 60 }}
+                />
+              </div>
               <button type="button" className="secondary" onClick={addElement}>
                 Add element
               </button>
@@ -397,6 +414,17 @@ export default function DesignsPage() {
                   <div className="field">
                     <label>h</label>
                     <input type="number" value={selected.h} onChange={(e) => updateSelected({ h: +e.target.value })} style={{ width: 60 }} />
+                  </div>
+                  <div className="field">
+                    <label>Font size</label>
+                    <input
+                      type="number"
+                      min={8}
+                      max={72}
+                      value={selected.fontSize || DEFAULT_FONT_SIZE}
+                      onChange={(e) => updateSelected({ fontSize: +e.target.value })}
+                      style={{ width: 60 }}
+                    />
                   </div>
                 </div>
               </div>

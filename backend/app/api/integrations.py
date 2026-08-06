@@ -25,6 +25,7 @@ async def get_config(db: Session = Depends(get_db)):
     return HomeAssistantConfigOut(
         base_url=config.base_url,
         token_set=bool(config.access_token),
+        poll_interval_s=config.poll_interval_s,
         updated_at=config.updated_at,
     )
 
@@ -35,11 +36,14 @@ async def set_config(payload: HomeAssistantConfigIn, db: Session = Depends(get_d
     config.base_url = payload.base_url
     if payload.access_token:  # blank means "keep the existing token"
         config.access_token = payload.access_token
+    if payload.poll_interval_s is not None:
+        config.poll_interval_s = payload.poll_interval_s
     db.commit()
     db.refresh(config)
     return HomeAssistantConfigOut(
         base_url=config.base_url,
         token_set=bool(config.access_token),
+        poll_interval_s=config.poll_interval_s,
         updated_at=config.updated_at,
     )
 

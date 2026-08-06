@@ -30,6 +30,9 @@ class Design(Base):
     # {"elements": [{"id": int, "type": "text"|"value"|"image", "x", "y", "w", "h", "props": {...}}]}
     # "value" elements' props: {"source": "static"|"home_assistant", "value": str (when
     # static), "entity_id": str, "attribute": str|None (when home_assistant)}.
+    # Both "text" and "value" elements' props also carry "fontSize": int (px, at the
+    # design's authored resolution) — purely a canvas-preview concern until real ePaper
+    # bitmap rendering (Section 7 step 4) exists to read it.
     layout_json: Mapped[dict] = mapped_column(JSON)
     # Canvas resolution this design was authored for. Defaults match the only panel this
     # system currently targets (Seeed XIAO + 4.2" 400x300 SSD1683, see firmware/README.md).
@@ -120,4 +123,8 @@ class HomeAssistantConfig(Base):
     id: Mapped[int] = mapped_column(primary_key=True, default=1)
     base_url: Mapped[str | None] = mapped_column(String, nullable=True)
     access_token: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Seconds between poll cycles (see app/services/ha_poller.py). Column default matches
+    # HOMESCREEN_HA_POLL_INTERVAL_S's env-var default so a freshly created config row
+    # behaves the same as before this became UI-configurable.
+    poll_interval_s: Mapped[int] = mapped_column(default=30)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)

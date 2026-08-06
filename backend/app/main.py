@@ -5,13 +5,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import designs, displays, gateways, integrations
-from app.database import Base, engine
+from app.database import Base, engine, ensure_schema_additions
 from app.services.ha_poller import run_poller
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
+    ensure_schema_additions()
     poller_task = asyncio.create_task(run_poller())
     try:
         yield
