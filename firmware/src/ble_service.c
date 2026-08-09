@@ -16,19 +16,23 @@ LOG_MODULE_REGISTER(ble_service, CONFIG_LOG_DEFAULT_LEVEL);
 
 #define FW_VERSION 1
 
-/* Placeholder 128-bit base UUID (spec 4.2 explicitly calls this a placeholder pattern —
- * generate a real one before shipping, see firmware/README.md). Last 16 bits of the
- * final segment distinguish service (0000) from each characteristic. */
+/* Real 128-bit base UUID for this project (spec 4.2 asked for one to replace its
+ * placeholder pattern; generated with uuidgen). The last 16 bits of the final segment
+ * distinguish the service (0000) from each characteristic.
+ *
+ * Duplicated in gateway/gateway/uuids.py, which is how the gateway finds the service and
+ * its characteristics — the two must change together, and changing them means reflashing
+ * before the gateway will see the device again. */
 #define BT_UUID_HOMESCREEN_SERVICE_VAL                                                           \
-	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abc0000)
+	BT_UUID_128_ENCODE(0x8fd9daef, 0xdd0f, 0x4243, 0x85e1, 0xf9b453750000)
 #define BT_UUID_HOMESCREEN_STATUS_VAL                                                            \
-	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abc0001)
+	BT_UUID_128_ENCODE(0x8fd9daef, 0xdd0f, 0x4243, 0x85e1, 0xf9b453750001)
 #define BT_UUID_HOMESCREEN_DATA_TRANSFER_VAL                                                     \
-	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abc0002)
+	BT_UUID_128_ENCODE(0x8fd9daef, 0xdd0f, 0x4243, 0x85e1, 0xf9b453750002)
 #define BT_UUID_HOMESCREEN_COMMAND_VAL                                                           \
-	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abc0003)
+	BT_UUID_128_ENCODE(0x8fd9daef, 0xdd0f, 0x4243, 0x85e1, 0xf9b453750003)
 #define BT_UUID_HOMESCREEN_BUTTON_EVENT_VAL                                                      \
-	BT_UUID_128_ENCODE(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abc0004)
+	BT_UUID_128_ENCODE(0x8fd9daef, 0xdd0f, 0x4243, 0x85e1, 0xf9b453750004)
 
 static struct bt_uuid_128 svc_uuid = BT_UUID_INIT_128(BT_UUID_HOMESCREEN_SERVICE_VAL);
 static struct bt_uuid_128 status_uuid = BT_UUID_INIT_128(BT_UUID_HOMESCREEN_STATUS_VAL);

@@ -76,6 +76,43 @@ stable small-integer IDs (already true — see `layout_json.elements[].id`), and
 255 concurrently diffable elements per design, which is generous for an ePaper status
 display. Revisit if that ever becomes a real constraint.
 
+## GATT layout: UUIDs and the `status` value encoding
+
+Both halves of this are duplicated between `firmware/src/ble_service.c` and
+`gateway/gateway/uuids.py` / `gateway/gateway/bleak_transport.py`, so they belong here.
+
+**UUIDs.** A real generated base, replacing the placeholder pattern spec 4.2 shipped
+with: service `8fd9daef-dd0f-4243-85e1-f9b453750000`, then `...0001` status, `...0002`
+data_transfer, `...0003` command, `...0004` button_event. The service UUID is what the
+gateway filters advertisements on; the device name (`HomeScreen Display`) rides in the
+scan response instead of the primary packet, since the 128-bit UUID already fills the
+primary packet's 31-byte budget. Regenerating the base means changing both files in the
+same commit and reflashing.
+
+**`status` value** — `struct status_value`, `__packed`, little-endian, 9 bytes:
+
+```
+bytes 0-3 : content_hash  (uint32)
+byte  4   : battery_pct   (uint8)
+bytes 5-6 : battery_mv    (uint16)
+bytes 7-8 : fw_version    (uint16)
+```
+
+The `__packed` matters: without it the compiler would pad `battery_mv` to a 2-byte
+boundary and every field after `content_hash` would shift by one. The gateway parses
+exactly these 9 bytes and ignores anything after them, so firmware may append fields
+without breaking an older gateway.
+
+**`button_event` value** — a single byte, bit *i* = checklist row *i*'s button pressed
+since the last read. Reading it clears the mask firmware-side, so the gateway must read
+it exactly once per connection (`sync.py` does this before fetching the payload, so a
+press made just before a wake shows up in the same cycle's content).
+
+**`data_transfer`** is write-with-response only (no WRITE_WITHOUT_RESP property). That's
+deliberate rather than incidental: firmware's reassembler requires chunks in strictly
+ascending index order (`firmware/src/chunk_protocol.h`), which write-with-response
+guarantees by making the gateway wait for each ack.
+
 ## CRC16 variant for chunk integrity (spec 4.3)
 
 Spec 4.3 specifies a CRC16 field but not which variant. Pinned to **CRC-16/CCITT-FALSE**
@@ -105,8 +142,27 @@ pushing whatever the backend currently says is pending.
 
 ## Full payload format
 
-Currently the backend returns the canonical JSON snapshot of `layout_json` as `data`.
-This is a placeholder — real ePaper bitmap rendering (converting `layout_json` into
-actual pixel data for the panel's controller chip) is Section 7 build-order step 4 and
-hasn't been built yet. The `full` payload's `data` field will change shape once that
-exists; `type: "full"` and `content_hash` are stable.
+The backend returns the canonical JSON snapshot of `layout_json` as `data` (backend →
+gateway, HTTP). The gateway translates that into the flat binary encoding firmware
+actually parses before chunking it — `encode_full_layout` in
+`gateway/gateway/protocol.py`, mirrored by `layout_store_apply_full` in
+`firmware/src/layout_store.c`:
+
+```
+byte 0    : format version (currently 1)
+byte 1    : element count (uint8)
+repeated per element:
+  byte 0    : element_id (uint8)
+  bytes 1-2 : x (uint16 LE)
+  bytes 3-4 : y (uint16 LE)
+  byte 5    : flags — bit0 checkable, bit1 checked
+  byte 6    : text_len (uint8)
+  bytes 7.. : text (ASCII, not null-terminated)
+```
+
+JSON stops at the gateway because firmware has no JSON parser. Capped at 16 elements and
+32 text bytes each, matching firmware's fixed-size in-RAM layout store; anything beyond
+those caps is truncated gateway-side rather than being rejected on-device.
+
+Rasterizing that into pixels is firmware's job (`src/rasterizer.c`) — a minimal
+fixed-width-font renderer, not the design editor's full text styling.

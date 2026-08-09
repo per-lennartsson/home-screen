@@ -1,7 +1,9 @@
 /*
  * Custom GATT service (spec 4.2): status (read/notify), button_event (read),
- * data_transfer (write), command (write). UUIDs here are a placeholder base —
- * generate a real one (`uuidgen` or similar) before this ships; see firmware/README.md.
+ * data_transfer (write), command (write). The UUIDs are defined in ble_service.c and
+ * duplicated in gateway/gateway/uuids.py, which is how the gateway locates the service
+ * and its characteristics — the two must change together, and changing them means
+ * reflashing before the gateway will see the device again.
  */
 
 #ifndef BLE_SERVICE_H_
