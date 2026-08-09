@@ -202,7 +202,14 @@ int epd_ssd1683_push_full(const uint8_t *framebuffer, size_t len)
 
 int epd_ssd1683_identify(void)
 {
-	uint8_t buf[EPD_FRAMEBUFFER_SIZE];
+	/* static, not a local: EPD_FRAMEBUFFER_SIZE is 15000 bytes, which overflows every
+	 * thread stack in this app (BT RX 1K, system workqueue 2K) many times over. As a
+	 * local this reliably tripped the MPU stack guard and reset the SoC the moment the
+	 * identify command arrived — and because the USB CDC console dies with the fault,
+	 * the reset looked like an unexplained reboot with no fault dump. Safe as a static
+	 * because epaper work is only ever submitted to the single-threaded epaper
+	 * workqueue (see ble_service.c), so there's no concurrent caller to race with. */
+	static uint8_t buf[EPD_FRAMEBUFFER_SIZE];
 
 	memset(buf, 0x00, sizeof(buf)); /* all black */
 	int err = epd_ssd1683_push_full(buf, sizeof(buf));

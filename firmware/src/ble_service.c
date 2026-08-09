@@ -44,6 +44,14 @@ static const struct bt_data ad[] = {
 	BT_DATA(BT_DATA_UUID128_ALL, adv_service_uuid, sizeof(adv_service_uuid)),
 };
 
+/* The 128-bit UUID already fills the primary advertising packet's 31-byte budget, so the
+ * device name goes in the scan response instead (its own separate 31-byte budget) —
+ * without this, scanners like LightBlue/nRF Connect see the device but can't show
+ * "HomeScreen Display" for it, only a blank/generic entry. */
+static const struct bt_data sd[] = {
+	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
+};
+
 struct __packed status_value {
 	uint32_t content_hash;
 	uint8_t battery_pct;
@@ -152,6 +160,41 @@ static ssize_t write_data_transfer(struct bt_conn *conn, const struct bt_gatt_at
 	return len;
 }
 
+/* write_command() runs on the Bluetooth stack's own callback context. epaper_identify()
+ * and epaper_force_full_refresh() each drive real SPI transfers plus multi-second BUSY-pin
+ * wait loops (see BUSY_TIMEOUT_MS in epaper_ssd1683.c) — blocking that long inside a GATT
+ * write callback delays the ATT write response long enough that the central times out and
+ * drops the connection before ever seeing it (observed on real hardware: the identify
+ * command reliably disconnected the phone mid-refresh).
+ *
+ * Deferring to Zephyr's *default* system workqueue isn't enough on its own — the BT host
+ * also uses that same queue to return a just-disconnected connection object to its pool,
+ * so a slow epaper op stuck there starves that cleanup too, which is what made
+ * bt_le_adv_start() keep failing with -ENOMEM after every disconnect (confirmed against
+ * real hardware, and matches github.com/zephyrproject-rtos/zephyr issue #90111 and Nordic
+ * DevZone thread 109942 on the same failure mode). A dedicated queue/thread keeps a slow
+ * or stuck panel refresh from ever blocking Bluetooth's own housekeeping. */
+#define EPAPER_WORKQ_STACK_SIZE 2048
+#define EPAPER_WORKQ_PRIORITY 10
+
+static struct k_work_q epaper_work_q;
+K_THREAD_STACK_DEFINE(epaper_work_q_stack, EPAPER_WORKQ_STACK_SIZE);
+
+static struct k_work identify_work;
+static struct k_work full_refresh_work;
+
+static void identify_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	epaper_identify();
+}
+
+static void full_refresh_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	epaper_force_full_refresh();
+}
+
 static ssize_t write_command(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 			      const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
 {
@@ -169,7 +212,7 @@ static ssize_t write_command(struct bt_conn *conn, const struct bt_gatt_attr *at
 
 	switch (command) {
 	case BLE_SERVICE_COMMAND_FORCE_FULL_REFRESH:
-		epaper_force_full_refresh();
+		k_work_submit_to_queue(&epaper_work_q, &full_refresh_work);
 		break;
 	case BLE_SERVICE_COMMAND_SLEEP_NOW:
 		if (conn != NULL) {
@@ -177,7 +220,7 @@ static ssize_t write_command(struct bt_conn *conn, const struct bt_gatt_attr *at
 		}
 		break;
 	case BLE_SERVICE_COMMAND_IDENTIFY:
-		epaper_identify();
+		k_work_submit_to_queue(&epaper_work_q, &identify_work);
 		break;
 	default:
 		LOG_WRN("command: unknown command 0x%02x", command);
@@ -240,6 +283,13 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 int ble_service_init(void)
 {
 	chunk_reassembler_reset(&reassembler);
+
+	k_work_queue_init(&epaper_work_q);
+	k_work_queue_start(&epaper_work_q, epaper_work_q_stack, K_THREAD_STACK_SIZEOF(epaper_work_q_stack),
+			    EPAPER_WORKQ_PRIORITY, NULL);
+
+	k_work_init(&identify_work, identify_work_handler);
+	k_work_init(&full_refresh_work, full_refresh_work_handler);
 	return bt_enable(NULL);
 }
 
@@ -250,7 +300,14 @@ void ble_service_set_event_callback(ble_service_event_cb_t cb)
 
 int ble_service_start_advertising(void)
 {
-	return bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), NULL, 0);
+	/* Stop defensively first, ignoring the result (ok to fail with "not advertising").
+	 * BT_LE_ADV_CONN_FAST_1 auto-stops advertising once a connection forms, but on real
+	 * hardware that teardown wasn't reliably complete by the time the very next cycle
+	 * called bt_le_adv_start() again after a disconnect — observed as bt_le_adv_start()
+	 * permanently failing with -ENOMEM (stale advertising-set resource never released)
+	 * on every cycle from then on, with no crash and no way to recover without a reset. */
+	bt_le_adv_stop();
+	return bt_le_adv_start(BT_LE_ADV_CONN_FAST_1, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 }
 
 int ble_service_stop_advertising(void)

@@ -13,6 +13,7 @@
 #include <errno.h>
 
 #include <zephyr/device.h>
+#include <zephyr/drivers/hwinfo.h>
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -110,9 +111,32 @@ static void advertise_and_wait_for_sync(void)
 	}
 }
 
+/* Logs why the last reset happened, then clears the cause register so the next one is
+ * unambiguous. On the nRF52840, a value of 0 (none of the named bits set) means POR or
+ * brownout — the SoC doesn't distinguish those two from each other, only from
+ * watchdog/software/lockup resets, which do set a bit. Worth keeping permanently: a
+ * battery-powered device that reboots in the field leaves nothing else to go on, and an
+ * MPU stack-guard fault (see epd_ssd1683_identify) kills the USB console before it can
+ * flush the fault dump, so this line is often the only surviving evidence. */
+static void log_reset_cause(void)
+{
+	uint32_t cause = 0;
+
+	hwinfo_get_reset_cause(&cause);
+	hwinfo_clear_reset_cause();
+
+	LOG_INF("reset cause: 0x%08x%s%s%s%s%s%s", cause,
+		(cause & RESET_PIN) ? " PIN" : "", (cause & RESET_SOFTWARE) ? " SOFTWARE" : "",
+		(cause & RESET_WATCHDOG) ? " WATCHDOG" : "",
+		(cause & RESET_CPU_LOCKUP) ? " CPU_LOCKUP" : "",
+		(cause & RESET_LOW_POWER_WAKE) ? " LOW_POWER_WAKE" : "",
+		(cause == 0) ? " (none set -> POR or brownout)" : "");
+}
+
 int main(void)
 {
 	LOG_INF("homescreen display firmware starting (fw_version=%d)", FW_VERSION);
+	log_reset_cause();
 
 	if (watchdog_setup() != 0) {
 		LOG_WRN("continuing without watchdog protection");
