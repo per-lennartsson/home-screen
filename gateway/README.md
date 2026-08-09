@@ -48,8 +48,8 @@ Linux hosts have no equivalent restriction — BlueZ needs no special setup.
    gateway/.venv/bin/python -m gateway scan --seconds 30
    ```
 
-   Firmware advertises for about 4 seconds once per wake interval (120 s by default), so
-   give it a full interval, or press a checklist button on the board to wake it
+   Firmware advertises for about 4 seconds once per wake interval (15 s during bring-up),
+   so give it a full interval, or press a checklist button on the board to wake it
    immediately. Nothing found? Check the board appears as `HomeScreen Display` in any
    phone BLE scanner app first — that isolates firmware from gateway.
 
@@ -76,12 +76,17 @@ Linux hosts have no equivalent restriction — BlueZ needs no special setup.
 
 Content converges after **two wake cycles**, not one — the gateway pushes on one
 connection and only learns it landed when it reads `status` on the next
-(docs/protocol.md, "Sync latency"). With the stock 120-second wake interval that's up to
-four minutes from editing a design to seeing it on the panel, and a failed CRC costs one
-more cycle.
+(docs/protocol.md, "Sync latency"). At the current 15-second `APP_WAKE_INTERVAL_S` that's
+about half a minute from editing a design to seeing it on the panel, and a failed CRC
+costs one more cycle.
 
-For bring-up, drop `APP_WAKE_INTERVAL_S` in `firmware/src/main.c` to ~15 s and reflash;
-the feedback loop becomes tolerable. Put it back before you care about battery life.
+15 s is a bring-up value chosen for a tolerable feedback loop, not a battery-life one —
+the radio is advertising roughly a fifth of the time. Raise `APP_WAKE_INTERVAL_S` in
+`firmware/src/main.c` once the path is proven.
+
+If you raise it well past a minute, lower `--checkin-interval` to match or most wakes
+will be no-ops: the gateway only opens a connection when a check-in is due or the backend
+has flagged the display as pending.
 
 ## Configuration
 

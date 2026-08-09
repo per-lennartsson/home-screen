@@ -47,11 +47,12 @@ than a phone BLE app — `gateway/README.md` walks through that.
 
 ## What you'll need to fill in / verify
 
-1. **Tune `APP_WAKE_INTERVAL_S` / `APP_ADVERTISING_WINDOW_MS`** (plain `#define`s at the
-   top of `main.c`, not yet Kconfig options) once you have real battery-life data — spec
-   8 leaves this open on purpose. For gateway bring-up, drop the wake interval from 120 s
-   to ~15 s first: content takes two wake cycles to converge (docs/protocol.md), so at
-   the stock interval every test iteration costs about four minutes.
+1. **Raise `APP_WAKE_INTERVAL_S` back up** (plain `#define` at the top of `main.c`, not
+   yet a Kconfig option) once the gateway path is proven. It's currently 15 s, chosen so
+   bring-up iterations take about half a minute instead of four — content needs two wake
+   cycles to converge (docs/protocol.md) — but that leaves the radio advertising roughly
+   a fifth of the time, which is not a battery-life setting. Spec 8 leaves the real value
+   open pending measurements.
 2. **Verify the VBAT divider ratio** (`VBAT_DIVIDER_RATIO` in `battery.c`, currently 3)
    against a real battery and multimeter — the ~1/3 figure is what's documented for this
    board, not something measured on this specific unit.

@@ -27,9 +27,13 @@ LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
 #define FW_VERSION 1
 
-/* Not yet Kconfig options — see firmware/README.md item 4. Tune once real battery-life
- * data exists (spec 8 leaves the exact interval open on purpose). */
-#define APP_WAKE_INTERVAL_S 120
+/* Not yet Kconfig options — see firmware/README.md item 1. Tune once real battery-life
+ * data exists (spec 8 leaves the exact interval open on purpose).
+ *
+ * 15s is a bring-up value, not a battery-life one: content takes two wake cycles to
+ * converge (docs/protocol.md, "Sync latency"), so at the earlier 120s every test
+ * iteration cost about four minutes. Raise it once the gateway path is proven. */
+#define APP_WAKE_INTERVAL_S 15
 #define APP_ADVERTISING_WINDOW_MS 4000
 
 /* Generous enough to cover one full advertising+sync cycle plus slack, short enough to
