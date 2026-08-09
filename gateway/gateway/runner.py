@@ -181,14 +181,21 @@ async def scan(seconds: float) -> None:
 
     from bleak import BleakScanner
 
-    seen: dict[str, tuple[str | None, int | None]] = {}
+    # address -> best name seen so far. "Best" means: a name from this scan's own
+    # advertisement data beats BLEDevice.name, which on macOS is whatever CoreBluetooth
+    # has cached for that peripheral — often a name from firmware flashed to the board
+    # months ago. The device name lives in our scan response rather than the primary
+    # advertising packet (see ble_service.c), so the first packet of a burst frequently
+    # arrives without it and the real name shows up a packet or two later.
+    seen: dict[str, str | None] = {}
 
     def on_detection(device, advertisement_data) -> None:
-        if device.address in seen:
-            return
-        name = advertisement_data.local_name or device.name
-        seen[device.address] = (name, advertisement_data.rssi)
-        print(f"  {device.address}  rssi={advertisement_data.rssi:>4}  {name or '(no name)'}")
+        first_sighting = device.address not in seen
+        if first_sighting:
+            seen[device.address] = None
+            print(f"  {device.address}  rssi={advertisement_data.rssi:>4}")
+        if advertisement_data.local_name:
+            seen[device.address] = advertisement_data.local_name
 
     print(
         f"Scanning {seconds:g}s for devices advertising {uuids.SERVICE_UUID}\n"
@@ -209,7 +216,16 @@ async def scan(seconds: float) -> None:
             "gateway/gateway/uuids.py matches firmware/src/ble_service.c."
         )
     else:
+        print(f"\nFound {len(seen)} display(s):")
+        for address, name in seen.items():
+            if name == uuids.DEVICE_NAME:
+                description = name
+            elif name is None:
+                description = "(no name in any advertisement seen — it rides in the scan response)"
+            else:
+                description = f"{name!r} — not this firmware's name; stale OS cache?"
+            print(f"  {address}  {description}")
         print(
-            f"\nFound {len(seen)} display(s). Register one in the frontend using its "
-            "address above as the MAC address, and assign it to this gateway."
+            "\nRegister one in the frontend using its address above as the MAC address, "
+            "and assign it to this gateway."
         )
