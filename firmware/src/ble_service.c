@@ -1,5 +1,7 @@
 #include "ble_service.h"
 
+#include <string.h>
+
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
@@ -107,69 +109,17 @@ static ssize_t read_button_event(struct bt_conn *conn, const struct bt_gatt_attr
 	return bt_gatt_attr_read(conn, attr, buf, len, offset, &mask, sizeof(mask));
 }
 
-static ssize_t write_data_transfer(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-				    const void *buf, uint16_t len, uint16_t offset,
-				    uint8_t flags)
-{
-	ARG_UNUSED(conn);
-	ARG_UNUSED(attr);
-	ARG_UNUSED(flags);
-
-	if (offset != 0) {
-		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
-	}
-
-	uint8_t msg_type;
-	const uint8_t *wrapped_payload;
-	size_t wrapped_payload_len;
-	bool complete = chunk_reassembler_feed(&reassembler, buf, len, &msg_type,
-						&wrapped_payload, &wrapped_payload_len);
-
-	if (complete) {
-		uint32_t target_hash;
-		const uint8_t *data;
-		size_t data_len;
-		bool unwrapped = chunk_protocol_unwrap_target_hash(
-			wrapped_payload, wrapped_payload_len, &target_hash, &data, &data_len);
-
-		if (unwrapped) {
-			bool applied = false;
-
-			if (msg_type == CHUNK_MSG_TYPE_FULL) {
-				applied = epaper_apply_full(data, data_len);
-			} else if (msg_type == CHUNK_MSG_TYPE_DIFF) {
-				applied = epaper_apply_diff(data, data_len);
-			} else {
-				LOG_WRN("data_transfer: unknown msg_type 0x%02x", msg_type);
-			}
-
-			/* content_hash is only bumped once the panel actually applied the
-			 * update — see spec 4.3: this is what tells the gateway (via the
-			 * next status read) that the sync succeeded. */
-			if (applied) {
-				ble_service_set_content_hash(target_hash);
-			} else {
-				LOG_WRN("data_transfer: epaper failed to apply update, "
-					"content_hash left unchanged");
-			}
-		} else {
-			LOG_WRN("data_transfer: reassembled message too short to contain "
-				"target hash");
-		}
-	}
-
-	/* Per BLE conventions, always ack the write itself regardless of whether the
-	 * chunk protocol accepted it — rejecting the write would be a link-layer error,
-	 * not how spec 4.3's "discard silently" is meant to surface. */
-	return len;
-}
-
-/* write_command() runs on the Bluetooth stack's own callback context. epaper_identify()
- * and epaper_force_full_refresh() each drive real SPI transfers plus multi-second BUSY-pin
- * wait loops (see BUSY_TIMEOUT_MS in epaper_ssd1683.c) — blocking that long inside a GATT
- * write callback delays the ATT write response long enough that the central times out and
- * drops the connection before ever seeing it (observed on real hardware: the identify
- * command reliably disconnected the phone mid-refresh).
+/* write_data_transfer() and write_command() both run on the Bluetooth stack's own
+ * callback context. epaper_apply_full()/epaper_apply_diff() (like epaper_identify() and
+ * epaper_force_full_refresh() below) drive real SPI transfers plus multi-second BUSY-pin
+ * wait loops (see BUSY_TIMEOUT_MS in epaper_ssd1683.c: "typically 1-2s", worst case
+ * 10s) — blocking that long inside a GATT write callback delays the ATT write response
+ * long enough that the central times out and drops the connection before ever seeing it.
+ * 241d357 fixed this for the command characteristic (identify/force_full_refresh) after
+ * it disconnected the phone mid-refresh on real hardware, but missed data_transfer,
+ * which has exactly the same problem on the far more common path: every full-payload
+ * push disconnected mid-transfer on the very next hardware test after that fix, with
+ * bleak reporting a plain "disconnected" while writing the completing chunk.
  *
  * Deferring to Zephyr's *default* system workqueue isn't enough on its own — the BT host
  * also uses that same queue to return a just-disconnected connection object to its pool,
@@ -197,6 +147,104 @@ static void full_refresh_work_handler(struct k_work *work)
 {
 	ARG_UNUSED(work);
 	epaper_force_full_refresh();
+}
+
+/* Unlike identify/full_refresh above, applying a data_transfer message needs the payload
+ * to still exist once the deferred work actually runs — and `data` in write_data_transfer
+ * points into the reassembler's own static buffer (chunk_protocol.h: "only valid until
+ * the next feed() call"), which a new connection's first write is free to start
+ * overwriting immediately. So the payload is copied into its own staging buffer, sized
+ * to chunk_reassembler_feed's own enforced ceiling (chunk_protocol.c rejects any write
+ * that would exceed CHUNK_MAX_PAYLOAD_LEN before it happens, so data_len can never
+ * exceed this).
+ *
+ * k_work_is_pending() before submitting guards the one real hazard: a second complete
+ * message arriving while the previous one is still being applied. That can only happen
+ * across two different connections (one gateway sync loop pushes at most one message
+ * per connection — see gateway/gateway/sync.py), and the current design covers exactly
+ * one connection at a time (main.c), so in practice this is a rare "reconnected
+ * unusually fast" case, not a normal one. Rather than queue a second update behind the
+ * first — which would need its own staging slot — it's dropped, matching this codebase's
+ * established "can't safely act on it right now, discard, the next check-in retries"
+ * convention (chunk_protocol.c, layout_store.c, epaper.c all do the same). */
+#define EPAPER_APPLY_STAGING_LEN (CHUNK_MAX_PAYLOAD_LEN - CHUNK_TARGET_HASH_LEN)
+
+static struct {
+	struct k_work work;
+	uint8_t msg_type;
+	uint8_t data[EPAPER_APPLY_STAGING_LEN];
+	size_t data_len;
+	uint32_t target_hash;
+} epaper_apply_staging;
+
+static void epaper_apply_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	bool applied = false;
+
+	if (epaper_apply_staging.msg_type == CHUNK_MSG_TYPE_FULL) {
+		applied = epaper_apply_full(epaper_apply_staging.data, epaper_apply_staging.data_len);
+	} else if (epaper_apply_staging.msg_type == CHUNK_MSG_TYPE_DIFF) {
+		applied = epaper_apply_diff(epaper_apply_staging.data, epaper_apply_staging.data_len);
+	}
+
+	/* content_hash is only bumped once the panel actually applied the update — see
+	 * spec 4.3: this is what tells the gateway (via the next status read) that the
+	 * sync succeeded. */
+	if (applied) {
+		ble_service_set_content_hash(epaper_apply_staging.target_hash);
+	} else {
+		LOG_WRN("data_transfer: epaper failed to apply update, content_hash left unchanged");
+	}
+}
+
+static ssize_t write_data_transfer(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+				    const void *buf, uint16_t len, uint16_t offset,
+				    uint8_t flags)
+{
+	ARG_UNUSED(conn);
+	ARG_UNUSED(attr);
+	ARG_UNUSED(flags);
+
+	if (offset != 0) {
+		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+	}
+
+	uint8_t msg_type;
+	const uint8_t *wrapped_payload;
+	size_t wrapped_payload_len;
+	bool complete = chunk_reassembler_feed(&reassembler, buf, len, &msg_type,
+						&wrapped_payload, &wrapped_payload_len);
+
+	if (complete) {
+		uint32_t target_hash;
+		const uint8_t *data;
+		size_t data_len;
+		bool unwrapped = chunk_protocol_unwrap_target_hash(
+			wrapped_payload, wrapped_payload_len, &target_hash, &data, &data_len);
+
+		if (!unwrapped) {
+			LOG_WRN("data_transfer: reassembled message too short to contain "
+				"target hash");
+		} else if (msg_type != CHUNK_MSG_TYPE_FULL && msg_type != CHUNK_MSG_TYPE_DIFF) {
+			LOG_WRN("data_transfer: unknown msg_type 0x%02x", msg_type);
+		} else if (k_work_is_pending(&epaper_apply_staging.work)) {
+			LOG_WRN("data_transfer: previous update still applying, dropping this "
+				"one — next check-in retries");
+		} else {
+			epaper_apply_staging.msg_type = msg_type;
+			epaper_apply_staging.target_hash = target_hash;
+			epaper_apply_staging.data_len = data_len;
+			memcpy(epaper_apply_staging.data, data, data_len);
+			k_work_submit_to_queue(&epaper_work_q, &epaper_apply_staging.work);
+		}
+	}
+
+	/* Per BLE conventions, always ack the write itself regardless of whether the
+	 * chunk protocol accepted it — rejecting the write would be a link-layer error,
+	 * not how spec 4.3's "discard silently" is meant to surface. */
+	return len;
 }
 
 static ssize_t write_command(struct bt_conn *conn, const struct bt_gatt_attr *attr,
@@ -294,6 +342,7 @@ int ble_service_init(void)
 
 	k_work_init(&identify_work, identify_work_handler);
 	k_work_init(&full_refresh_work, full_refresh_work_handler);
+	k_work_init(&epaper_apply_staging.work, epaper_apply_work_handler);
 	return bt_enable(NULL);
 }
 
