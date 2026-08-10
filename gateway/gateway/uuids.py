@@ -23,11 +23,14 @@ BUTTON_EVENT_CHAR_UUID = "8fd9daef-dd0f-4243-85e1-f9b453750004"
 DEVICE_NAME = "HomeScreen Display"
 
 # Command characteristic values — mirrors BLE_SERVICE_COMMAND_* in ble_service.h.
-# FORCE_FULL_REFRESH/SLEEP_NOW/IDENTIFY are unused by the sync loop itself, here only so
-# a diagnostic tool can trigger them without redefining the constants. ROTATE_NORMAL/
-# ROTATE_180 *are* used by the sync loop (sync.py) — sent on every sync so a display's
-# rotate_180 setting is self-healing after a firmware reset, the same way layout content
-# already is.
+# SLEEP_NOW/IDENTIFY are unused by the sync loop itself, here only so a diagnostic tool
+# can trigger them without redefining the constants. FORCE_FULL_REFRESH *is* used by the
+# sync loop (sync.py) — asserted once when Display.full_refresh_due is true (manual
+# trigger or a recurring schedule elapsed), then acked to the backend so it isn't
+# repeated on every sync. ROTATE_NORMAL/ROTATE_180 are also used by the sync loop, but
+# unlike FORCE_FULL_REFRESH they're sent on every sync regardless, since they're
+# persistent device state that needs to be self-healing after a firmware reset, not a
+# one-shot action.
 COMMAND_FORCE_FULL_REFRESH = 0x01
 COMMAND_SLEEP_NOW = 0x02
 COMMAND_IDENTIFY = 0x03

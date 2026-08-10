@@ -465,6 +465,7 @@ textarea:focus {
   padding: 10px 12px;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 

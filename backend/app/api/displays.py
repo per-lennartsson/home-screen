@@ -10,6 +10,7 @@ from app.schemas.display import (
     ButtonEventReport,
     DisplayAssign,
     DisplayCreate,
+    DisplayFullRefreshIntervalSet,
     DisplayGatewayAssign,
     DisplayOut,
     DisplayRotationSet,
@@ -132,6 +133,56 @@ async def set_wake_interval(display_id: int, payload: DisplayWakeIntervalSet, db
         raise HTTPException(status_code=404, detail="display not found")
 
     display.wake_interval_s = payload.wake_interval_s
+    db.commit()
+    db.refresh(display)
+    return display
+
+
+@router.post("/{display_id}/force-full-refresh", response_model=DisplayOut)
+async def force_full_refresh(display_id: int, db: Session = Depends(get_db)):
+    """Manual "fix ghosting now" trigger. Flags a hardware anti-ghosting flash-and-
+    redraw (COMMAND_FORCE_FULL_REFRESH) for the gateway to assert on the next sync
+    (gateway/gateway/sync.py) regardless of whether the display is already in_sync —
+    this isn't a content change, so desired_content_hash is untouched. Cleared by
+    /full-refresh-ack once the gateway confirms it was written over BLE."""
+    display = db.get(Display, display_id)
+    if display is None:
+        raise HTTPException(status_code=404, detail="display not found")
+
+    display.full_refresh_requested = True
+    db.commit()
+    db.refresh(display)
+    return display
+
+
+@router.post("/{display_id}/full-refresh-interval", response_model=DisplayOut)
+async def set_full_refresh_interval(
+    display_id: int, payload: DisplayFullRefreshIntervalSet, db: Session = Depends(get_db)
+):
+    """Sets (or clears, via null) the recurring full-refresh schedule. Purely
+    declarative here, like wake_interval_s — Display.full_refresh_due does the actual
+    "is it time yet" math and the gateway asserts it on sync."""
+    display = db.get(Display, display_id)
+    if display is None:
+        raise HTTPException(status_code=404, detail="display not found")
+
+    display.full_refresh_interval_s = payload.full_refresh_interval_s
+    db.commit()
+    db.refresh(display)
+    return display
+
+
+@router.post("/{display_id}/full-refresh-ack", response_model=DisplayOut)
+async def ack_full_refresh(display_id: int, db: Session = Depends(get_db)):
+    """Gateway calls this right after successfully writing
+    COMMAND_FORCE_FULL_REFRESH over BLE (sync.py) — clears the one-shot manual request
+    and restarts the recurring schedule's clock."""
+    display = db.get(Display, display_id)
+    if display is None:
+        raise HTTPException(status_code=404, detail="display not found")
+
+    display.full_refresh_requested = False
+    display.last_full_refresh_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(display)
     return display

@@ -37,6 +37,14 @@ def ensure_schema_additions() -> None:
             conn.exec_driver_sql(
                 "ALTER TABLE displays ADD COLUMN wake_interval_s INTEGER NOT NULL DEFAULT 15"
             )
+        if display_cols and "full_refresh_requested" not in display_cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE displays ADD COLUMN full_refresh_requested BOOLEAN NOT NULL DEFAULT 0"
+            )
+        if display_cols and "full_refresh_interval_s" not in display_cols:
+            conn.exec_driver_sql("ALTER TABLE displays ADD COLUMN full_refresh_interval_s INTEGER")
+        if display_cols and "last_full_refresh_at" not in display_cols:
+            conn.exec_driver_sql("ALTER TABLE displays ADD COLUMN last_full_refresh_at DATETIME")
 
 
 async def get_db():

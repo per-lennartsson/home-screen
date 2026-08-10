@@ -78,6 +78,9 @@ class MockDisplay:
         self.rotate_180 = False
         self.wake_interval_s: int | None = None
         self.last_command: int | None = None
+        # Counts COMMAND_FORCE_FULL_REFRESH writes, so tests can assert it fired exactly
+        # once per due request rather than on every sync (unlike rotate/wake-interval).
+        self.full_refresh_count = 0
 
         # Test hooks for proving retry/backoff behavior (spec 5.1 step 8).
         self.fail_next_connects = 0
@@ -99,6 +102,8 @@ class MockDisplay:
             self.rotate_180 = False
         elif command == uuids.COMMAND_SET_WAKE_INTERVAL_S:
             self.wake_interval_s = int.from_bytes(value, "little")
+        elif command == uuids.COMMAND_FORCE_FULL_REFRESH:
+            self.full_refresh_count += 1
 
     def status(self) -> dict:
         return {

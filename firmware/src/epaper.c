@@ -87,9 +87,31 @@ bool epaper_apply_diff(const uint8_t *data, size_t len)
 	return epd_ssd1683_push_full(framebuffer, sizeof(framebuffer)) == 0;
 }
 
+/* How many full black<->white passes to flash before redrawing content. epaper_apply_full
+ * and epaper_apply_diff both already push through epd_display_refresh's DUC2=0xFF
+ * waveform on *every* update (see this file's header comment — there's no separate
+ * partial-refresh path in v1), so a single extra push of the same waveform (what this
+ * function used to do: one blank frame, then redraw) is electrically identical to an
+ * ordinary content update and does nothing extra to the accumulated ghosting. What
+ * actually shakes out the residual DC bias in the pixels is several full inversions in a
+ * row — the same technique epd_ssd1683_identify's black-then-white blink uses, just
+ * repeated. Tune this if ghosting still isn't fully gone in practice.
+ */
+#define FULL_REFRESH_FLASH_CYCLES 3
+
 void epaper_force_full_refresh(void)
 {
-	push_blank_frame();
+	for (int i = 0; i < FULL_REFRESH_FLASH_CYCLES; i++) {
+		memset(framebuffer, 0x00, sizeof(framebuffer)); /* 0 = black */
+		epd_ssd1683_push_full(framebuffer, sizeof(framebuffer));
+		memset(framebuffer, 0xFF, sizeof(framebuffer)); /* 1 = white */
+		epd_ssd1683_push_full(framebuffer, sizeof(framebuffer));
+	}
+
+	/* Redraw whatever layout_store already has retained so the display ends up showing
+	 * its current content again, just cleanly. */
+	rasterizer_render(framebuffer, sizeof(framebuffer), layout_store_get(), current_rotate_180);
+	epd_ssd1683_push_full(framebuffer, sizeof(framebuffer));
 }
 
 void epaper_identify(void)

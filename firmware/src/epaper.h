@@ -18,8 +18,13 @@ bool epaper_apply_full(const uint8_t *data, size_t len);
  * true on success. */
 bool epaper_apply_diff(const uint8_t *data, size_t len);
 
-/* Command 0x01: force a full refresh next update regardless of content changes, to
- * clear ghosting accumulated from repeated partial refreshes (spec 4.4). */
+/* Command 0x01: immediately flashes the panel through several full black/white
+ * inversions (see FULL_REFRESH_FLASH_CYCLES in epaper.c) to shake out accumulated
+ * ghosting, then redraws whatever layout is currently retained. A single inversion
+ * isn't enough — every ordinary content update already does one of those (v1 has no
+ * partial-refresh path), so this has to do something visibly more thorough than a normal
+ * update to actually clear ghosting. Triggered from the frontend, manually or on a
+ * schedule, via backend Display.full_refresh_due and gateway/gateway/sync.py. */
 void epaper_force_full_refresh(void);
 
 /* Command 0x03: visibly identify this specific display, useful when physically locating

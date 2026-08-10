@@ -41,6 +41,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ wake_interval_s: wakeIntervalS }),
     }),
+  forceFullRefresh: (displayId) => request(`/displays/${displayId}/force-full-refresh`, { method: "POST" }),
+  setFullRefreshInterval: (displayId, fullRefreshIntervalS) =>
+    request(`/displays/${displayId}/full-refresh-interval`, {
+      method: "POST",
+      body: JSON.stringify({ full_refresh_interval_s: fullRefreshIntervalS }),
+    }),
   getPayload: (displayId) => request(`/displays/${displayId}/payload`),
 
   listDesigns: () => request("/designs"),

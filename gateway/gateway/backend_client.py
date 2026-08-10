@@ -36,3 +36,8 @@ class BackendClient:
         resp = await self._client.get(f"/api/displays/{display_id}/payload")
         resp.raise_for_status()
         return resp.json()
+
+    async def ack_full_refresh(self, display_id: int) -> dict:
+        resp = await self._client.post(f"/api/displays/{display_id}/full-refresh-ack")
+        resp.raise_for_status()
+        return resp.json()

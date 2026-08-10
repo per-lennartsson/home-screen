@@ -31,6 +31,14 @@ class DisplayWakeIntervalSet(BaseModel):
     wake_interval_s: int = Field(ge=5, le=3600)
 
 
+class DisplayFullRefreshIntervalSet(BaseModel):
+    # None disables the recurring schedule. Lower bound (5 min) avoids a schedule that
+    # would burn battery on a hardware flash-and-redraw for no visible benefit —
+    # partial-refresh ghosting takes many cycles to become noticeable; upper bound is a
+    # generous 30 days.
+    full_refresh_interval_s: int | None = Field(default=None, ge=300, le=2592000)
+
+
 class DisplayStatusReport(BaseModel):
     content_hash: int
     battery_pct: int
@@ -55,6 +63,8 @@ class DisplayOut(BaseModel):
     height: int
     rotate_180: bool
     wake_interval_s: int
+    full_refresh_interval_s: int | None
+    last_full_refresh_at: datetime | None
     current_content_hash: int | None
     desired_content_hash: int | None
     battery_pct: int | None
@@ -62,6 +72,7 @@ class DisplayOut(BaseModel):
     last_seen_at: datetime | None
     created_at: datetime
     in_sync: bool
+    full_refresh_due: bool
 
 
 class PayloadInSync(BaseModel):

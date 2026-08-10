@@ -12,6 +12,15 @@ const LOW_BATTERY_PCT = 20;
 
 const STATUS_LABEL = { in_sync: "In sync", pending: "Update pending", never: "Never seen" };
 
+// Presets for the recurring full-refresh schedule, in seconds. "" maps to null (off).
+const FULL_REFRESH_PRESETS = [
+  { value: "", label: "Off" },
+  { value: "3600", label: "Every hour" },
+  { value: "21600", label: "Every 6 hours" },
+  { value: "86400", label: "Every day" },
+  { value: "604800", label: "Every week" },
+];
+
 function warningFor(display) {
   const lowBattery = display.battery_pct != null && display.battery_pct < LOW_BATTERY_PCT;
   const hoursSinceSeen = display.last_seen_at
@@ -43,6 +52,9 @@ export default function DisplaysPage() {
   const [assigningGatewayFor, setAssigningGatewayFor] = useState(null);
   const [editingWakeIntervalFor, setEditingWakeIntervalFor] = useState(null);
   const [wakeIntervalDraft, setWakeIntervalDraft] = useState(15);
+  const [editingFullRefreshFor, setEditingFullRefreshFor] = useState(null);
+  const [fullRefreshIntervalDraft, setFullRefreshIntervalDraft] = useState("");
+  const [refreshingNowFor, setRefreshingNowFor] = useState(null);
   const [detailsFor, setDetailsFor] = useState(null);
   const [payload, setPayload] = useState(null);
 
@@ -146,6 +158,35 @@ export default function DisplaysPage() {
     try {
       await api.setWakeInterval(displayId, +wakeIntervalDraft);
       setEditingWakeIntervalFor(null);
+      refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  const forceFullRefresh = async (display) => {
+    setError(null);
+    setRefreshingNowFor(display.id);
+    try {
+      await api.forceFullRefresh(display.id);
+      refresh();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setRefreshingNowFor(null);
+    }
+  };
+
+  const startEditingFullRefresh = (display) => {
+    setFullRefreshIntervalDraft(display.full_refresh_interval_s ? String(display.full_refresh_interval_s) : "");
+    setEditingFullRefreshFor((v) => (v === display.id ? null : display.id));
+  };
+
+  const saveFullRefreshInterval = async (displayId) => {
+    setError(null);
+    try {
+      await api.setFullRefreshInterval(displayId, fullRefreshIntervalDraft === "" ? null : +fullRefreshIntervalDraft);
+      setEditingFullRefreshFor(null);
       refresh();
     } catch (e) {
       setError(e.message);
@@ -355,6 +396,17 @@ export default function DisplaysPage() {
                     {" · "}
                     wakes every {d.wake_interval_s}s
                   </div>
+                  <div className="muted">
+                    {d.last_full_refresh_at
+                      ? `Full refresh ${relativeTime(d.last_full_refresh_at)}`
+                      : "Never fully refreshed"}
+                    {" · "}
+                    {d.full_refresh_interval_s
+                      ? FULL_REFRESH_PRESETS.find((p) => +p.value === d.full_refresh_interval_s)?.label ||
+                        `every ${d.full_refresh_interval_s}s`
+                      : "no schedule"}
+                    {d.full_refresh_due && " · due on next wake"}
+                  </div>
                 </div>
 
                 {editingWakeIntervalFor === d.id && (
@@ -386,6 +438,34 @@ export default function DisplaysPage() {
                   </div>
                 )}
 
+                {editingFullRefreshFor === d.id && (
+                  <div className="entity-card-body">
+                    <div className="field">
+                      <label>Full refresh schedule</label>
+                      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                        <select
+                          value={fullRefreshIntervalDraft}
+                          onChange={(e) => setFullRefreshIntervalDraft(e.target.value)}
+                          autoFocus
+                        >
+                          {FULL_REFRESH_PRESETS.map((p) => (
+                            <option key={p.value} value={p.value}>
+                              {p.label}
+                            </option>
+                          ))}
+                        </select>
+                        <button type="button" className="btn small" onClick={() => saveFullRefreshInterval(d.id)}>
+                          Save
+                        </button>
+                      </div>
+                      <div className="muted" style={{ marginTop: 4 }}>
+                        Automatically does a hardware flash-and-redraw on this schedule, in addition to any manual
+                        "Full refresh now" presses, to clear ghosting that partial refreshes accumulate over time.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="entity-card-footer">
                   {design && (
                     <button type="button" className="btn secondary small" onClick={() => setChangingDesignFor((v) => (v === d.id ? null : d.id))}>
@@ -412,6 +492,23 @@ export default function DisplaysPage() {
                     onClick={() => startEditingWakeInterval(d)}
                   >
                     Wake interval
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary small"
+                    title="Flash and redraw the panel now to clear e-paper ghosting"
+                    disabled={refreshingNowFor === d.id}
+                    onClick={() => forceFullRefresh(d)}
+                  >
+                    {refreshingNowFor === d.id ? "Refreshing…" : "Full refresh now"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary small"
+                    title="Automatically clear ghosting on a recurring schedule"
+                    onClick={() => startEditingFullRefresh(d)}
+                  >
+                    Refresh schedule
                   </button>
                   <button type="button" className="btn ghost" onClick={() => toggleDetails(d.id)}>
                     Details

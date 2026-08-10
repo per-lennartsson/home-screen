@@ -80,6 +80,23 @@ class Display(Base):
     # firmware's BLE_SERVICE_MIN/MAX_WAKE_INTERVAL_S.
     wake_interval_s: Mapped[int] = mapped_column(default=15)
 
+    # One-shot manual trigger for COMMAND_FORCE_FULL_REFRESH (epaper.h) — a hardware
+    # anti-ghosting flash-and-redraw, independent of content_hash: the gateway asserts it
+    # on the next sync regardless of whether the display is already in_sync, then clears
+    # it via /full-refresh-ack (gateway/gateway/sync.py). Same "declarative flag, gateway
+    # decides when to assert" model as rotate_180/wake_interval_s above.
+    full_refresh_requested: Mapped[bool] = mapped_column(default=False)
+
+    # Optional recurring schedule (seconds) so partial-refresh ghosting can't accumulate
+    # indefinitely between manual presses. None disables it. See full_refresh_due below
+    # for how this combines with last_full_refresh_at.
+    full_refresh_interval_s: Mapped[int | None] = mapped_column(nullable=True)
+
+    # Set by /full-refresh-ack once the gateway confirms COMMAND_FORCE_FULL_REFRESH was
+    # written over BLE — both clears full_refresh_requested and restarts the recurring
+    # schedule's clock.
+    last_full_refresh_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
     # uint32 CRC32 of the rendered content this display currently holds / should hold
     current_content_hash: Mapped[int | None] = mapped_column(nullable=True)
     desired_content_hash: Mapped[int | None] = mapped_column(nullable=True)
@@ -95,6 +112,25 @@ class Display(Base):
     @property
     def in_sync(self) -> bool:
         return self.current_content_hash == self.desired_content_hash
+
+    @property
+    def full_refresh_due(self) -> bool:
+        """Whether the gateway should assert COMMAND_FORCE_FULL_REFRESH on the next
+        sync — either a pending manual request, or the recurring schedule's interval has
+        elapsed since the last confirmed refresh (or none has ever happened)."""
+        if self.full_refresh_requested:
+            return True
+        if self.full_refresh_interval_s is None:
+            return False
+        if self.last_full_refresh_at is None:
+            return True
+        # SQLAlchemy round-trips DateTime columns through SQLite as naive values (see
+        # frontend/src/lib/format.js's parseUtc comment for the same gotcha) even though
+        # they were stored from an aware UTC datetime — so this can't just use _utcnow()
+        # directly, or comparing aware-vs-naive raises TypeError.
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        elapsed = (now - self.last_full_refresh_at).total_seconds()
+        return elapsed >= self.full_refresh_interval_s
 
 
 class ContentCache(Base):

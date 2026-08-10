@@ -27,6 +27,7 @@ class DeviceState:
     last_checkin_monotonic: float | None = None
     rotate_180: bool = False
     wake_interval_s: int = 15
+    full_refresh_due: bool = False
 
 
 class GatewayService:
@@ -58,6 +59,12 @@ class GatewayService:
             state.display_id = d["id"]
             state.rotate_180 = d["rotate_180"]
             state.wake_interval_s = d["wake_interval_s"]
+            if d["full_refresh_due"]:
+                # Same "don't wait for the next debounced check-in" treatment as an
+                # out-of-sync content hash below — a manual "fix ghosting now" press
+                # should take effect on the very next advertisement, not linger.
+                state.full_refresh_due = True
+                state.pending = True
             if not d["in_sync"]:
                 state.pending = True
 
@@ -93,6 +100,16 @@ class GatewayService:
                 await conn.write_command(
                     uuids.COMMAND_SET_WAKE_INTERVAL_S, state.wake_interval_s.to_bytes(2, "little")
                 )
+
+                # Unlike rotate/wake-interval above, this is a one-shot action, not
+                # persistent device state — asserted at most once per due request, then
+                # immediately acked to the backend so it isn't repeated on every
+                # subsequent sync (that would mean a full hardware flash-and-redraw
+                # every wake cycle, defeating the point of a schedule).
+                if state.full_refresh_due:
+                    await conn.write_command(uuids.COMMAND_FORCE_FULL_REFRESH)
+                    await self.backend.ack_full_refresh(state.display_id)
+                    state.full_refresh_due = False
 
                 status = await conn.read_status()
                 state.last_checkin_monotonic = time.monotonic()
