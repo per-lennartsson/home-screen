@@ -13,6 +13,14 @@ first real-hardware bring-up`. The register-level command sequence in
 1.0, Jan 2021), and the pin mapping in `boards/xiao_ble.overlay` against Seeed's
 published pin table.
 
+Note that published pin table proved wrong in at least one place: it puts the panel's
+BUSY line on D2, and it is actually on **D5**, confirmed against the physical board. That
+mistake was invisible for a long time because `epd_wait_busy()` also had a bug that made
+it return immediately, so a BUSY line that never asserted looked exactly like one that was
+already idle. Both are fixed; the remaining unverified entries in that table should be
+treated with suspicion. Fixing it also forced row 1's checklist button off D5 onto D2 —
+a soldering change, not just a devicetree one.
+
 What has *not* been proven end to end is a full sync driven by the real gateway rather
 than a phone BLE app — `gateway/README.md` walks through that.
 
@@ -38,10 +46,16 @@ than a phone BLE app — `gateway/README.md` walks through that.
 - `src/epaper.c/.h` — the integration layer between the chunk protocol and the panel
   driver. `epaper_apply_full` parses the flat binary layout payload and re-rasterizes;
   `epaper_apply_diff` patches the retained layout and re-rasterizes from it.
-- `src/layout_store.c/.h` + `src/rasterizer.c/.h` + `src/font_basic.h` — the minimal v1
-  rasterizer: retains the last-applied layout in RAM so diffs have something to patch,
-  and draws it into a 1bpp framebuffer with a fixed-width bitmap font. Deliberately
-  narrow (no word-wrap, no text styling, no partial refresh) — see `rasterizer.h`.
+- `src/layout_store.c/.h` — retains the last-applied layout in RAM so diffs have
+  something to patch, and parses the flat binary wire format (`docs/protocol.md`).
+- `src/rasterizer.c/.h` + `src/fonts/` — draws that layout into a 1bpp framebuffer using
+  LVGL and real proportional fonts. The fonts, and the glyph-metrics table the design
+  editor measures with, are both generated from one TTF by `tools/fonts/generate.mjs` —
+  that shared origin is what makes the browser preview match the panel rather than
+  approximate it. Renders in horizontal strips (`LV_DISPLAY_RENDER_MODE_PARTIAL`)
+  because a full-panel RGB565 buffer would be 240KB and does not fit in RAM.
+  Still no word-wrap and no partial refresh — every apply is a full redraw and a full
+  panel refresh.
 - `boards/xiao_ble.overlay` — SPI3 + GPIO wiring for CS/DC/RST/BUSY and the battery ADC,
   per the pin mapping above.
 

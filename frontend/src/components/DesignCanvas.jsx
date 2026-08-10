@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { formatEntityValue } from "../lib/format.js";
 import { DEFAULT_FONT_SIZE } from "../lib/layout.js";
 import { entityValueKey } from "../lib/useEntityValues.js";
+import GlyphText from "./GlyphText.jsx";
 
 export function elementLabel(el, entityValues) {
   if (el.type === "text") return el.text || "(empty text)";
@@ -82,16 +83,21 @@ function CanvasElement({ element, index, scale, selected, interactive, onSelect,
         top: element.y * scale,
         width: element.w * scale,
         height: element.h * scale,
-        fontSize: (element.fontSize || DEFAULT_FONT_SIZE) * scale,
-        fontWeight: element.bold ? 600 : 400,
-        textAlign: element.align || "left",
-        textDecoration:
-          [element.underline && "underline", element.strikethrough && "line-through"].filter(Boolean).join(" ") || "none",
       }}
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
     >
-      {elementLabel(element, entityValues)}
+      <GlyphText
+        text={elementLabel(element, entityValues)}
+        fontSize={element.fontSize || DEFAULT_FONT_SIZE}
+        bold={!!element.bold}
+        align={element.align || "left"}
+        underline={!!element.underline}
+        strikethrough={!!element.strikethrough}
+        width={element.w}
+        height={element.h}
+        scale={scale}
+      />
     </div>
   );
 }

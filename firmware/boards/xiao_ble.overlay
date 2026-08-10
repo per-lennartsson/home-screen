@@ -15,15 +15,25 @@
  *   D4 = P0.04   D5 = P0.05   D6 = P1.11   D7 = P1.12
  *   D8 = P1.13   D9 = P1.14   D10 = P1.15
  *
- * ePaper Driver Board pin table (Seeed wiki, V2 board):
- *   RST=D0  CS=D1  BUSY=D2  DC=D3  SCK=D8  MOSI=D10
+ * ePaper Driver Board pin table:
+ *   RST=D0  CS=D1  DC=D3  BUSY=D5  SCK=D8  MOSI=D10
  *
- * Checklist row buttons (this feature): D4, D5, D6, D7, D9 are the only pins the
- * ePaper board and battery ADC leave free — wired one per row, active-low to GND with
- * the SoC's internal pull-up (see `buttons` node below). D4-D7's GPIO numbers above are
- * transcribed from Seeed's published XIAO nRF52840 pinout diagram, not yet cross-checked
- * against a physical board the way D0-D3/D8-D10 were for the ePaper wiring — verify
- * against the actual board silkscreen before wiring real buttons.
+ * BUSY=D5 was verified against the physical board. The rest of this row still comes from
+ * Seeed's published wiki table, which had BUSY on D2 — demonstrably wrong here, so treat
+ * the unverified entries with suspicion if anything else misbehaves. D2 is not used by
+ * the panel at all and now carries a checklist button instead (see `buttons` below).
+ *
+ * Checklist row buttons (this feature): D2, D4, D6, D7, D9 are the pins the ePaper board
+ * and battery ADC leave free — wired one per row, active-low to GND with the SoC's
+ * internal pull-up (see `buttons` node below).
+ *
+ * D5 is NOT among them: it is the panel's BUSY line. It was originally listed here as a
+ * free button pin because the ePaper pin table above wrongly placed BUSY on D2, so both
+ * ends of that mistake had to be corrected together — row 1's button moved D5 -> D2.
+ *
+ * These GPIO numbers are transcribed from Seeed's published XIAO nRF52840 pinout diagram
+ * and, apart from D5, are not cross-checked against a physical board — verify against the
+ * actual silkscreen before wiring real buttons.
  *
  * Battery sense (documented on the Seeed forum for XIAO nRF52840): P0.31 is AIN7, the
  * ADC input for the VBAT divider; P0.14 is the divider's active-low enable pin. See
@@ -79,6 +89,36 @@
 };
 
 / {
+	chosen {
+		/*
+		 * LVGL's Zephyr module (zephyr/modules/lvgl/lvgl.c) is compiled
+		 * unconditionally under CONFIG_LVGL and #errors at preprocess time unless a
+		 * `zephyr,display` chosen node exists — it has no "I'll drive my own
+		 * display" mode. This project deliberately does *not* go through Zephyr's
+		 * display subsystem for the panel (see epaper_ssd1683.c and the SSD1683
+		 * driver detour that was tried and reverted): the SSD1683 driver here is
+		 * the hardware-proven one and stays.
+		 *
+		 * So this points at a dummy display purely to satisfy that build-time
+		 * requirement. Nothing renders through it. The real rendering path creates
+		 * its own lv_display sized to the panel and flushes into the 1bpp
+		 * framebuffer that epd_ssd1683_push_full() already takes.
+		 */
+		zephyr,display = &lvgl_dummy_display;
+	};
+
+	/* Far smaller than the panel's 400x300 so the buffers LVGL's module allocates for
+	 * this never-used display cost bytes instead of kilobytes. Not smaller still: the
+	 * module sizes the buffer as a percentage of the display (CONFIG_LV_Z_VDB_SIZE,
+	 * default 10), and at 8x8 that rounded to zero rows, so lvgl_init() asserted
+	 * "lv_display_set_buffers: h != 0 (the buffer is too small)" on every boot. */
+	lvgl_dummy_display: lvgl-dummy-dc {
+		compatible = "zephyr,dummy-dc";
+		status = "okay";
+		width = <64>;
+		height = <64>;
+	};
+
 	/*
 	 * Board-specific GPIO/ADC wiring with no dedicated driver of its own —
 	 * `zephyr,user` is Zephyr's standard place for exactly this (see e.g.
@@ -90,7 +130,13 @@
 		io-channels = <&adc 7>;
 		dc-gpios = <&gpio0 29 GPIO_ACTIVE_HIGH>;   /* D3 */
 		rst-gpios = <&gpio0 2 GPIO_ACTIVE_LOW>;    /* D0 */
-		busy-gpios = <&gpio0 28 GPIO_ACTIVE_HIGH>; /* D2 — datasheet: high = busy */
+		/* D5, not D2. The pin table in this file's header (transcribed from Seeed's
+		 * wiki) said BUSY=D2, and that was wrong for this board: a boot-time probe
+		 * (epd_probe_busy_line in epaper_ssd1683.c) sampled P0.28 978 times across a
+		 * software reset and never once saw it asserted, and the pin was confirmed
+		 * against the physical board as D5. Every panel operation was consequently
+		 * falling through to a 4-second blind wait — see epd_wait_busy(). */
+		busy-gpios = <&gpio0 5 GPIO_ACTIVE_HIGH>; /* D5 — datasheet: high = busy */
 		battery-enable-gpios = <&gpio0 14 GPIO_ACTIVE_LOW>; /* low = divider enabled */
 
 		/* One tactile button per checklist row (up to 5, the number of free GPIOs —
@@ -106,7 +152,14 @@
 		 * GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), row0_button_gpios)-style spec in
 		 * button.c, matching every other pin in this node. */
 		row0-button-gpios = <&gpio0 4 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;  /* D4 */
-		row1-button-gpios = <&gpio0 5 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;  /* D5 */
+		/* Moved off D5, which turned out to be the panel's BUSY line (see busy-gpios
+		 * above) — the two cannot share a pin. D2/P0.28 is free precisely because it
+		 * was the pin BUSY was mistakenly assigned to.
+		 *
+		 * NOTE: this is a wiring change, not just a devicetree change. If a physical
+		 * button for row 1 is already soldered to D5, it has to move to D2 as well,
+		 * otherwise pressing it fights the panel driving BUSY. */
+		row1-button-gpios = <&gpio0 28 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>; /* D2 */
 		row2-button-gpios = <&gpio1 11 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>; /* D6 */
 		row3-button-gpios = <&gpio1 12 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>; /* D7 */
 		row4-button-gpios = <&gpio1 14 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>; /* D9 */

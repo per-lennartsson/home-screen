@@ -1,202 +1,255 @@
 #include "rasterizer.h"
 
-#include <stdbool.h>
 #include <string.h>
 
+#include <lvgl.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/sys/util.h>
+
 #include "epaper_ssd1683.h"
-#include "font_basic.h"
+#include "fonts/hs_fonts.h"
 
-#define GLYPH_WIDTH 8
-#define GLYPH_HEIGHT 8
+LOG_MODULE_REGISTER(rasterizer, CONFIG_LOG_DEFAULT_LEVEL);
 
-/* font_scale range a layout_element_t can carry (layout_store.h) — mirrors
- * gateway/gateway/protocol.py's FONT_SCALE_MIN/MAX. Not a wire-format constraint (the
- * byte is a plain uint8_t), just the range the v1 bitmap font can be sanely
- * pixel-multiplied to on a 400x300 panel; clamped here rather than at parse time
- * (layout_store.c) for the same reason x/y aren't range-checked there either —
- * set_pixel_black() below clips safely regardless. */
-#define FONT_SCALE_MIN 1
-#define FONT_SCALE_MAX 8
+/* Height of the strip LVGL renders into before each flush.
+ *
+ * This is why the render mode is PARTIAL rather than FULL: a full-panel RGB565 buffer
+ * would be EPD_WIDTH * EPD_HEIGHT * 2 = 240KB, which does not fit in the nRF52840's 256KB
+ * of RAM at all. LVGL instead renders the screen in horizontal bands and calls flush_cb
+ * once per band, so the peak cost is one strip. 32 rows costs 400*32*2 = 25KB.
+ *
+ * The panel is only pushed once, after the whole screen has been rendered (see
+ * epaper.c) — the strips accumulate into the caller's 1bpp framebuffer, they are not
+ * individually sent to the display. So a smaller strip trades a little more per-band
+ * overhead for RAM, and nothing else. */
+#define STRIP_HEIGHT 32
 
-#define GLYPH_INDEX_DEGREE 0xFE
-#define GLYPH_INDEX_A_RING 0xFD
-#define GLYPH_INDEX_A_DIAERESIS 0xFC
-#define GLYPH_INDEX_O_DIAERESIS 0xFB
-#define GLYPH_INDEX_NONE 0xFF
+/* RGB565 rather than LVGL's I1 (1-bit) format even though the panel is monochrome: I1 is
+ * a far less exercised path in LVGL's software renderer, and the conversion to 1bpp has
+ * to happen in flush_cb regardless (the SSD1683's bit-per-pixel layout is not LVGL's).
+ * The cost is a transient strip buffer, not power or refresh time. */
+static uint16_t strip_buf[EPD_WIDTH * STRIP_HEIGHT] __aligned(4);
 
-static void set_pixel_black(uint8_t *fb, size_t fb_len, int x, int y, bool rotate_180)
+static lv_display_t *display;
+
+/* flush_cb has no way to receive caller context, so the current render target is stashed
+ * here for the duration of one rasterizer_render() call. Safe because all panel work is
+ * serialized onto the single epaper workqueue (see ble_service.c) — there is never a
+ * second concurrent render. */
+static uint8_t *target_fb;
+static size_t target_fb_len;
+static bool target_rotate_180;
+
+/* Midpoint of the RGB565 channel sums; anything darker becomes a black pixel. */
+#define RGB565_LUMA_MIDPOINT ((31 + 63 + 31) / 2)
+
+static void set_pixel(int x, int y, bool black)
 {
 	if (x < 0 || y < 0 || x >= EPD_WIDTH || y >= EPD_HEIGHT) {
 		return; /* silently clip — an out-of-range layout must never corrupt memory */
 	}
-	/* First real-hardware bring-up showed the panel comes out horizontally mirrored:
-	 * the SSD1683's Driver Output Control (0x01) only exposes a gate (Y) scan
-	 * direction (GD/SM/TB) — there's no source (X) scan direction bit, so the S0..S399
-	 * wiring direction can't be corrected from a register. Mirroring x here, once, is
-	 * equivalent to flipping the whole rendered image before it's written to RAM.
+
+	/* The panel comes out horizontally mirrored: the SSD1683's Driver Output Control
+	 * (0x01) only exposes a gate (Y) scan direction, so the S0..S399 source wiring
+	 * direction cannot be corrected from a register and has to be undone here.
 	 *
-	 * rotate_180 (per-display setting, spec: ble_service.h's ROTATE_180 command) asks
-	 * for the whole image rotated 180° on top of that — e.g. the enclosure's uneven
-	 * bezel needs to sit at the other edge. Working through the two reflections: a
-	 * point that always ends up at device column (WIDTH-1-x) when not rotated ends up
-	 * at device column x once the panel itself is physically rotated 180° in its mount
-	 * (the mount's rotation is what cancels the hardware mirror here, not this code) —
-	 * so rotate_180 skips the x mirror entirely and flips y instead. */
-	int device_x = rotate_180 ? x : (EPD_WIDTH - 1 - x);
-	int device_y = rotate_180 ? (EPD_HEIGHT - 1 - y) : y;
+	 * rotate_180 asks for the whole image rotated 180° on top of that. Working through
+	 * the two reflections: a point that lands at device column (WIDTH-1-x) unrotated
+	 * lands at column x once the panel is physically rotated in its mount — the mount's
+	 * rotation cancels the hardware mirror — so rotate_180 skips the x mirror and flips
+	 * y instead. */
+	int device_x = target_rotate_180 ? x : (EPD_WIDTH - 1 - x);
+	int device_y = target_rotate_180 ? (EPD_HEIGHT - 1 - y) : y;
 	size_t byte_index = (size_t)device_y * EPD_WIDTH_BYTES + (size_t)device_x / 8;
-	if (byte_index >= fb_len) {
+
+	if (byte_index >= target_fb_len) {
 		return;
 	}
-	fb[byte_index] &= (uint8_t)~(0x80 >> (device_x % 8));
+
+	uint8_t mask = (uint8_t)(0x80 >> (device_x % 8));
+
+	if (black) {
+		target_fb[byte_index] &= (uint8_t)~mask; /* 0 = black */
+	} else {
+		target_fb[byte_index] |= mask; /* 1 = white */
+	}
 }
 
-static uint8_t to_glyph_index(char c)
+static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
-	unsigned char uc = (unsigned char)c;
+	const uint16_t *pixels = (const uint16_t *)px_map;
+	int32_t w = lv_area_get_width(area);
+	int32_t h = lv_area_get_height(area);
 
-	if (uc >= 'a' && uc <= 'z') {
-		/* v1's font has no lowercase glyphs (font_basic.h) — render as uppercase
-		 * rather than doubling the table; the retained text itself keeps its real
-		 * case, only glyph selection is affected. */
-		uc = (unsigned char)(uc - 'a' + 'A');
-	}
-	if (uc == 0xB0) {
-		/* Degree sign — Latin-1 code point 0xB0, the one non-ASCII character this
-		 * pipeline carries through intact (gateway/gateway/protocol.py encodes
-		 * text as Latin-1, not ASCII, specifically for this). One extra glyph
-		 * (font_basic.h's font_glyph_degree) rather than widening the main
-		 * contiguous table all the way from 'Z' (0x5A) up to 0xB0. */
-		return GLYPH_INDEX_DEGREE;
-	}
-	if (uc == 0xC5 || uc == 0xE5) {
-		/* Å/å — Latin-1 0xC5/0xE5. Swedish room/label text (this project's primary
-		 * UI language) uses these routinely, so they get the same one-off glyph
-		 * treatment as the degree sign above, not the placeholder box. */
-		return GLYPH_INDEX_A_RING;
-	}
-	if (uc == 0xC4 || uc == 0xE4) {
-		return GLYPH_INDEX_A_DIAERESIS; /* Ä/ä */
-	}
-	if (uc == 0xD6 || uc == 0xF6) {
-		return GLYPH_INDEX_O_DIAERESIS; /* Ö/ö */
-	}
-	if (uc < FONT_FIRST_CHAR || uc > FONT_LAST_CHAR) {
-		return GLYPH_INDEX_NONE; /* no glyph for this character — draw_glyph() falls back to a placeholder */
-	}
-	return (uint8_t)(uc - FONT_FIRST_CHAR);
-}
+	for (int32_t y = 0; y < h; y++) {
+		for (int32_t x = 0; x < w; x++) {
+			/* Row stride is the area's own width, not the display width: under
+			 * RENDER_MODE_PARTIAL each flush receives a buffer holding just this
+			 * band, packed tightly. (Under RENDER_MODE_FULL it would be the whole
+			 * display buffer instead — the two are not interchangeable.) */
+			uint16_t px = pixels[y * w + x];
+			uint8_t r = (px >> 11) & 0x1F;
+			uint8_t g = (px >> 5) & 0x3F;
+			uint8_t b = px & 0x1F;
 
-static uint8_t clamp_font_scale(uint8_t font_scale)
-{
-	if (font_scale < FONT_SCALE_MIN) {
-		return FONT_SCALE_MIN;
-	}
-	if (font_scale > FONT_SCALE_MAX) {
-		return FONT_SCALE_MAX;
-	}
-	return font_scale;
-}
-
-/* Draws one glyph pixel as a scale x scale block — the v1 font is one hand-authored
- * 8x8 bitmap (font_basic.h); larger font_scale values pixel-multiply it rather than
- * switching to a second, separately-authored font. */
-static void draw_scaled_pixel(uint8_t *fb, size_t fb_len, int x, int y, uint8_t scale, bool rotate_180)
-{
-	for (int dy = 0; dy < scale; dy++) {
-		for (int dx = 0; dx < scale; dx++) {
-			set_pixel_black(fb, fb_len, x + dx, y + dy, rotate_180);
+			set_pixel(area->x1 + x, area->y1 + y, (r + g + b) < RGB565_LUMA_MIDPOINT);
 		}
 	}
+
+	lv_display_flush_ready(disp);
 }
 
-static void draw_glyph(uint8_t *fb, size_t fb_len, int origin_x, int origin_y, char c, uint8_t scale,
+static lv_display_t *get_display(void)
+{
+	if (display) {
+		return display;
+	}
+
+	display = lv_display_create(EPD_WIDTH, EPD_HEIGHT);
+	if (!display) {
+		LOG_ERR("lv_display_create failed — out of LVGL heap? (CONFIG_LV_Z_MEM_POOL_SIZE)");
+		return NULL;
+	}
+
+	/* Color format before buffers: lv_display_set_buffers() validates the buffer size
+	 * against the format, and asserts if it is set afterwards. */
+	lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);
+	lv_display_set_buffers(display, strip_buf, NULL, sizeof(strip_buf),
+			       LV_DISPLAY_RENDER_MODE_PARTIAL);
+	lv_display_set_flush_cb(display, flush_cb);
+
+	return display;
+}
+
+/* The wire format carries Latin-1, one byte per glyph (docs/protocol.md), but LVGL
+ * decodes label text as UTF-8 — so every byte >= 0x80 would be an invalid UTF-8 lead byte
+ * and get dropped or misdecoded. That is precisely the range holding Å/Ä/Ö/å/ä/ö and the
+ * degree sign, i.e. the characters this project's Swedish UI depends on.
+ *
+ * Latin-1 code points are identical to Unicode's first 256, so the transcode is the plain
+ * two-byte UTF-8 encoding. Returns a NUL-terminated string in `out`.
+ */
+static void latin1_to_utf8(const char *text, uint8_t text_len, char *out, size_t out_size)
+{
+	size_t written = 0;
+
+	for (uint8_t i = 0; i < text_len; i++) {
+		unsigned char c = (unsigned char)text[i];
+
+		if (c < 0x80) {
+			if (written + 1 >= out_size) {
+				break;
+			}
+			out[written++] = (char)c;
+		} else {
+			if (written + 2 >= out_size) {
+				break;
+			}
+			out[written++] = (char)(0xC0 | (c >> 6));
+			out[written++] = (char)(0x80 | (c & 0x3F));
+		}
+	}
+	out[written] = '\0';
+}
+
+static lv_text_align_t lv_align_for(layout_align_t align)
+{
+	switch (align) {
+	case LAYOUT_ALIGN_CENTER:
+		return LV_TEXT_ALIGN_CENTER;
+	case LAYOUT_ALIGN_RIGHT:
+		return LV_TEXT_ALIGN_RIGHT;
+	case LAYOUT_ALIGN_LEFT:
+	default:
+		return LV_TEXT_ALIGN_LEFT;
+	}
+}
+
+static void draw_element(lv_obj_t *screen, const layout_element_t *el)
+{
+	/* Worst case every Latin-1 byte becomes two UTF-8 bytes, plus the terminator. */
+	char utf8[LAYOUT_MAX_TEXT_LEN * 2 + 1];
+	lv_obj_t *label = lv_label_create(screen);
+
+	if (!label) {
+		LOG_WRN("rasterizer: could not create label for element %u", el->element_id);
+		return;
+	}
+
+	latin1_to_utf8(el->text, el->text_len, utf8, sizeof(utf8));
+	lv_label_set_text(label, utf8);
+
+	lv_obj_set_style_text_font(label, hs_font_get(el->font_id), 0);
+	lv_obj_set_style_text_color(label, lv_color_black(), 0);
+	lv_obj_set_style_text_align(label, lv_align_for(el->align), 0);
+
+	/* Alignment needs a box to align within. Designs saved before format 3 carry no
+	 * width, so fall back to sizing to the text — which makes every alignment behave as
+	 * left, the same as it rendered before. */
+	if (el->w > 0) {
+		lv_obj_set_width(label, el->w);
+	} else {
+		lv_obj_set_width(label, LV_SIZE_CONTENT);
+	}
+
+	/* Clip rather than wrap: the design editor lays out absolutely-positioned boxes and
+	 * does not wrap either, so wrapping here would put text where the editor never
+	 * showed it. */
+	lv_label_set_long_mode(label, LV_LABEL_LONG_CLIP);
+
+	lv_text_decor_t decor = LV_TEXT_DECOR_NONE;
+
+	if (el->underline) {
+		decor |= LV_TEXT_DECOR_UNDERLINE;
+	}
+	/* Two independent reasons to strike text through: the explicit editor style, and a
+	 * checklist row that has been ticked off (physically, via button.c, or from the
+	 * backend). */
+	if (el->strikethrough || (el->checkable && el->checked)) {
+		decor |= LV_TEXT_DECOR_STRIKETHROUGH;
+	}
+	lv_obj_set_style_text_decor(label, decor, 0);
+
+	lv_obj_set_pos(label, el->x, el->y);
+}
+
+void rasterizer_render(uint8_t *framebuffer, size_t framebuffer_len, const layout_t *layout,
 			bool rotate_180)
 {
-	uint8_t index = to_glyph_index(c);
+	lv_display_t *disp = get_display();
 
-	if (index == GLYPH_INDEX_NONE) {
-		/* A small outline box — visually distinct from any real glyph, so a
-		 * character outside the v1 font's coverage is obviously a gap during
-		 * bring-up rather than silently misrendering as some other letter. */
-		for (int dx = 1; dx <= 5; dx++) {
-			draw_scaled_pixel(fb, fb_len, origin_x + dx * scale, origin_y, scale, rotate_180);
-			draw_scaled_pixel(fb, fb_len, origin_x + dx * scale, origin_y + 6 * scale, scale,
-					   rotate_180);
-		}
-		for (int dy = 0; dy <= 6; dy++) {
-			draw_scaled_pixel(fb, fb_len, origin_x + scale, origin_y + dy * scale, scale, rotate_180);
-			draw_scaled_pixel(fb, fb_len, origin_x + 5 * scale, origin_y + dy * scale, scale,
-					   rotate_180);
-		}
-		return;
-	}
-
-	const uint8_t *rows;
-
-	switch (index) {
-	case GLYPH_INDEX_DEGREE:
-		rows = font_glyph_degree;
-		break;
-	case GLYPH_INDEX_A_RING:
-		rows = font_glyph_a_ring;
-		break;
-	case GLYPH_INDEX_A_DIAERESIS:
-		rows = font_glyph_a_diaeresis;
-		break;
-	case GLYPH_INDEX_O_DIAERESIS:
-		rows = font_glyph_o_diaeresis;
-		break;
-	default:
-		rows = font_glyphs[index];
-		break;
-	}
-	for (int row = 0; row < GLYPH_HEIGHT; row++) {
-		uint8_t bits = rows[row];
-		for (int col = 0; col < GLYPH_WIDTH; col++) {
-			if (bits & (0x80 >> col)) {
-				draw_scaled_pixel(fb, fb_len, origin_x + col * scale, origin_y + row * scale,
-						   scale, rotate_180);
-			}
-		}
-	}
-}
-
-static void draw_text(uint8_t *fb, size_t fb_len, int x, int y, const char *text, uint8_t text_len,
-		       uint8_t scale, bool rotate_180)
-{
-	for (uint8_t i = 0; i < text_len; i++) {
-		draw_glyph(fb, fb_len, x + i * GLYPH_WIDTH * scale, y, text[i], scale, rotate_180);
-	}
-}
-
-static void draw_strikethrough(uint8_t *fb, size_t fb_len, int x, int y, uint8_t text_len, uint8_t scale,
-				bool rotate_180)
-{
-	int width = text_len * GLYPH_WIDTH * scale;
-	int mid_y = y + (GLYPH_HEIGHT * scale) / 2;
-	int thickness = 2 * scale; /* 2px at scale 1 — visible on a 400x300 panel — scaling with the text */
-
-	for (int dx = 0; dx < width; dx++) {
-		for (int dy = 0; dy < thickness; dy++) {
-			set_pixel_black(fb, fb_len, x + dx, mid_y + dy, rotate_180);
-		}
-	}
-}
-
-void rasterizer_render(uint8_t *framebuffer, size_t framebuffer_len, const layout_t *layout, bool rotate_180)
-{
 	memset(framebuffer, 0xFF, framebuffer_len); /* 1 = white, per SSD1683 RAM convention */
 
-	for (uint8_t i = 0; i < layout->count; i++) {
-		const layout_element_t *el = &layout->elements[i];
-		uint8_t scale = clamp_font_scale(el->font_scale);
-
-		draw_text(framebuffer, framebuffer_len, el->x, el->y, el->text, el->text_len, scale, rotate_180);
-
-		if (el->checkable && el->checked) {
-			draw_strikethrough(framebuffer, framebuffer_len, el->x, el->y, el->text_len, scale,
-					    rotate_180);
-		}
+	if (!disp) {
+		return; /* already logged; a blank frame beats a corrupt one */
 	}
+
+	target_fb = framebuffer;
+	target_fb_len = framebuffer_len;
+	target_rotate_180 = rotate_180;
+
+	lv_obj_t *screen = lv_display_get_screen_active(disp);
+
+	/* Rebuild the object tree from scratch each render. The alternative — retaining
+	 * labels and mutating them — would have to track element identity across full
+	 * layout replacements, and this runs a handful of times an hour on a screen that
+	 * takes seconds to refresh. */
+	lv_obj_clean(screen);
+	lv_obj_set_style_bg_color(screen, lv_color_white(), 0);
+	lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+	lv_obj_set_style_pad_all(screen, 0, 0);
+	/* An element positioned near the panel edge makes the screen's content larger than
+	 * the screen, and LVGL would then render scrollbars into the framebuffer — ink that
+	 * the design editor never showed. There is nothing to scroll on an e-paper panel. */
+	lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
+	lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+
+	for (uint8_t i = 0; i < layout->count; i++) {
+		draw_element(screen, &layout->elements[i]);
+	}
+
+	lv_refr_now(disp);
+
+	target_fb = NULL;
+	target_fb_len = 0;
 }

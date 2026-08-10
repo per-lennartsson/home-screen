@@ -2,10 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client.js";
 import DesignCanvas, { elementLabel } from "../components/DesignCanvas.jsx";
 import { formatEntityValue, relativeTime } from "../lib/format.js";
-import { DEFAULT_FONT_SIZE, emptyElement, fromLayoutJson, haEntityRefs, toLayoutJson } from "../lib/layout.js";
+import { DEFAULT_FONT_SIZE, FONT_SIZES, emptyElement, fromLayoutJson, haEntityRefs, snapFontSize, toLayoutJson } from "../lib/layout.js";
 import { entityValueKey, useEntityValues } from "../lib/useEntityValues.js";
 
 const CANVAS_CSS_WIDTH = 480;
+
+/** Move one step along the shared font ladder, or null at either end (so the caller can
+ *  disable the button instead of silently clamping to the same value). */
+function stepFontSize(current, direction) {
+  const index = FONT_SIZES.indexOf(snapFontSize(current || DEFAULT_FONT_SIZE));
+  const next = index + direction;
+  return next >= 0 && next < FONT_SIZES.length ? FONT_SIZES[next] : null;
+}
 
 function snapshotOf(name, width, height, elements) {
   return JSON.stringify({ name, width, height, elements });
@@ -529,11 +537,23 @@ export default function DesignsPage() {
                 <div className="inspector-row">
                   <label className="muted">Size</label>
                   <div className="stepper">
-                    <button type="button" onClick={() => updateSelected({ fontSize: Math.max(8, (selected.fontSize || DEFAULT_FONT_SIZE) - 8) })}>
+                    {/* Steps through FONT_SIZES rather than by a fixed ±8: the device
+                        only has generated fonts for the ladder's sizes (see
+                        firmware/src/fonts/hs_fonts.h), so an off-ladder value could not
+                        be rendered as authored. */}
+                    <button
+                      type="button"
+                      disabled={stepFontSize(selected.fontSize, -1) === null}
+                      onClick={() => updateSelected({ fontSize: stepFontSize(selected.fontSize, -1) })}
+                    >
                       −
                     </button>
-                    <span className="value">{selected.fontSize || DEFAULT_FONT_SIZE}</span>
-                    <button type="button" onClick={() => updateSelected({ fontSize: Math.min(64, (selected.fontSize || DEFAULT_FONT_SIZE) + 8) })}>
+                    <span className="value">{snapFontSize(selected.fontSize || DEFAULT_FONT_SIZE)}</span>
+                    <button
+                      type="button"
+                      disabled={stepFontSize(selected.fontSize, +1) === null}
+                      onClick={() => updateSelected({ fontSize: stepFontSize(selected.fontSize, +1) })}
+                    >
                       ＋
                     </button>
                   </div>

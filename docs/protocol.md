@@ -150,30 +150,57 @@ actually parses before chunking it — `encode_full_layout` in
 `firmware/src/layout_store.c`:
 
 ```
-byte 0    : format version (currently 2)
+byte 0    : format version (currently 3)
 byte 1    : element count (uint8)
 repeated per element:
   byte 0    : element_id (uint8)
   bytes 1-2 : x (uint16 LE)
   bytes 3-4 : y (uint16 LE)
-  byte 5    : flags — bit0 checkable, bit1 checked
-  byte 6    : font_scale (uint8) — integer multiple of the rasterizer's 8px glyph cell,
-              e.g. 2 for a 16px-tall design element (protocol.py's _font_scale_for());
-              added in format version 2, version-1 devices have no equivalent field
-  byte 7    : text_len (uint8)
-  bytes 8.. : text (Latin-1, not null-terminated — one byte per rendered glyph column;
-              firmware/src/font_basic.h only covers ASCII plus a few one-off extra
-              glyphs — the degree sign (0xB0) and Å/Ä/Ö/å/ä/ö (0xC4-0xD6, 0xE4-0xF6)
-              for Swedish text — everything else outside that falls back to a
-              placeholder box)
+  bytes 5-6 : w (uint16 LE) — the element's box width. Added in format 3: `align` below
+              cannot be resolved without knowing the box being aligned within, and
+              before this the device had no idea how wide an element was.
+  byte 7    : flags — bit0 checkable, bit1 checked, bit2 underline, bit3 strikethrough,
+              bits4-5 alignment (0 left, 1 center, 2 right). Note there is no bold bit;
+              weight lives in font_id below.
+  byte 8    : font_id (uint8) — index into the shared font ladder: the size's index in
+              {12, 16, 20, 24, 32, 48}, plus 6 for semibold. Added in format 3,
+              replacing format 2's font_scale.
+  byte 9    : text_len (uint8)
+  bytes 10..: text (Latin-1, not null-terminated — one byte per glyph. The generated
+              fonts cover 0x20-0x7E and all of 0xA0-0xFF, so every byte the encoding can
+              produce is renderable; bytes outside Latin-1 are replaced with "?" at
+              encode time.)
 ```
+
+### Why font_id and not a pixel size
+
+The device can only render sizes it has a generated font for. Those fonts are produced by
+`tools/fonts/generate.mjs` from a single TTF, which in the same pass emits the glyph
+metrics the design editor measures with (`frontend/src/lib/font_metrics.json`) — that
+shared origin is what makes the editor's preview match the panel instead of approximating
+it. Naming a font by index keeps the set closed: there is no way to author a size the
+device cannot faithfully draw.
+
+The three places that define the ladder must be changed together: `SIZES` in
+`tools/fonts/generate.mjs`, `hs_font_sizes[]` in `firmware/src/fonts/hs_fonts.c`, and
+`FONT_SIZES` in `gateway/gateway/protocol.py`.
+
+Format 2 is not accepted by a firmware build that speaks format 3 — the per-element
+record is a different length, so misparsing it would produce garbage rather than degraded
+output. Since the gateway and firmware are deployed together and the gateway re-pushes a
+full layout whenever content differs, a rejected payload costs one wake cycle, not a
+stuck display.
 
 JSON stops at the gateway because firmware has no JSON parser. Capped at 16 elements and
 32 text bytes each, matching firmware's fixed-size in-RAM layout store; anything beyond
 those caps is truncated gateway-side rather than being rejected on-device.
 
-Rasterizing that into pixels is firmware's job (`src/rasterizer.c`) — a minimal
-fixed-width-font renderer, not the design editor's full text styling. Font size is the
-one exception: `font_scale` pixel-multiplies the single hand-authored bitmap font, so
-sizes land on whole 8px steps (clamped 1-8, i.e. 8-64px) rather than arbitrary point
-sizes the way the canvas preview allows.
+Rasterizing that into pixels is firmware's job (`src/rasterizer.c`), which renders through
+LVGL using the generated fonts in `firmware/src/fonts/`. Size, weight, left/center/right
+alignment, underline and strikethrough are all drawn. Word wrap is not: text is clipped to
+the element's box, matching the design editor, which does not wrap either.
+
+One conversion happens at this boundary worth knowing about: the wire carries Latin-1, one
+byte per glyph, but LVGL decodes label text as UTF-8. `rasterizer.c` transcodes before
+handing text to LVGL — without it every byte ≥ 0x80 (Å/Ä/Ö/å/ä/ö and the degree sign)
+would be an invalid UTF-8 lead byte.

@@ -36,10 +36,12 @@ class Design(Base):
     # rendering.resolve_layout() into a runtime-only "checked": bool prop).
     # Both "text" and "value" elements' props also carry "fontSize": int (px, at the
     # design's authored resolution, which for this project's only supported panel is
-    # 1:1 with device pixels). gateway/gateway/protocol.py::_font_scale_for() rounds it
-    # to the nearest whole multiple of the firmware's 8px glyph cell (clamped 1-8) when
-    # encoding the wire payload — so the physical display honors it, just snapped to
-    # 8px steps rather than the arbitrary sizes the canvas preview allows.
+    # 1:1 with device pixels), plus the styling props "bold", "align", "underline" and
+    # "strikethrough" — all of which reach the panel as of wire format 3.
+    # fontSize must be one of the shared font ladder's sizes: those are the only ones the
+    # device has a generated font for (firmware/src/fonts/hs_fonts.h). The design editor
+    # only offers ladder values, and gateway/gateway/protocol.py::_font_id_for() snaps
+    # anything else to the nearest when encoding, for designs saved before the ladder.
     layout_json: Mapped[dict] = mapped_column(JSON)
     # Canvas resolution this design was authored for. Defaults match the only panel this
     # system currently targets (Seeed XIAO + 4.2" 400x300 SSD1683, see firmware/README.md).

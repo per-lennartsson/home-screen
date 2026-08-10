@@ -14,6 +14,7 @@
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/hwinfo.h>
+#include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/watchdog.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -143,8 +144,38 @@ static void log_reset_cause(void)
 		(cause == 0) ? " (none set -> POR or brownout)" : "");
 }
 
+/* How long to wait at boot for a host to open the USB CDC console (prj.conf's USB block).
+ * Bounded, and deliberately short: in normal service this display runs on a battery with
+ * nothing plugged into USB, where DTR never asserts and this wait is dead time on every
+ * reset. Long enough for macOS to enumerate the device and a terminal to attach when
+ * someone is actually debugging, negligible otherwise. Kept in step with
+ * CONFIG_LOG_PROCESS_THREAD_STARTUP_DELAY_MS so the buffered boot log flushes just after
+ * the terminal is attached rather than just before. */
+#define CONSOLE_WAIT_TIMEOUT_MS 2000
+#define CONSOLE_WAIT_POLL_MS 50
+
+static void wait_for_console(void)
+{
+	const struct device *console = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
+
+	if (!device_is_ready(console)) {
+		return;
+	}
+
+	for (int waited = 0; waited < CONSOLE_WAIT_TIMEOUT_MS; waited += CONSOLE_WAIT_POLL_MS) {
+		uint32_t dtr = 0;
+
+		if (uart_line_ctrl_get(console, UART_LINE_CTRL_DTR, &dtr) == 0 && dtr) {
+			return;
+		}
+		k_msleep(CONSOLE_WAIT_POLL_MS);
+	}
+}
+
 int main(void)
 {
+	wait_for_console();
+
 	LOG_INF("homescreen display firmware starting (fw_version=%d)", FW_VERSION);
 	log_reset_cause();
 
@@ -154,6 +185,7 @@ int main(void)
 
 	battery_init();
 	epaper_init();
+
 	if (button_init(&wake_sem) != 0) {
 		LOG_WRN("continuing without checklist buttons");
 	}

@@ -102,46 +102,79 @@ def encode_diff(values: dict[int, str]) -> bytes:
     return out
 
 
-FULL_LAYOUT_FORMAT_VERSION = 2
+FULL_LAYOUT_FORMAT_VERSION = 3
 LAYOUT_MAX_ELEMENTS = 16
 LAYOUT_MAX_TEXT_LEN = 32
 
-# Design-editor default (frontend/src/lib/layout.js's DEFAULT_FONT_SIZE) and the v1
-# rasterizer's native bitmap cell (firmware/src/font_basic.h — GLYPH_WIDTH/HEIGHT in
-# rasterizer.c), used below to turn an authored pixel size into the wire's integer
-# font_scale. 1 design px isn't 1 device px in general, but this project's only
-# supported panel and only Design default (400x300) currently make it so.
 DEFAULT_FONT_SIZE_PX = 16
-FONT_GLYPH_PX = 8
-FONT_SCALE_MIN = 1
-FONT_SCALE_MAX = 8  # 64px glyphs — already more than half a 300px-tall panel
+
+# The shared font ladder. These are exactly the sizes tools/fonts/generate.mjs generated
+# an LVGL font for, and must stay in step with hs_font_sizes[] in
+# firmware/src/fonts/hs_fonts.c and FONT_SIZES in frontend/src/lib/font_metrics.json.
+#
+# Format 3 replaced format 2's `font_scale` with this index. font_scale was a multiplier
+# on a single hand-authored 8px bitmap font, so it could only ever produce whole multiples
+# of 8px; the device now renders real proportional fonts and the wire has to name *which*
+# generated font, since a size with no generated font cannot be rendered as authored.
+FONT_SIZES = (12, 16, 20, 24, 32, 48)
+
+# Alignment, packed into the flags byte. Values match the order in
+# frontend/src/lib/layout.js (`align`).
+ALIGN_LEFT = 0
+ALIGN_CENTER = 1
+ALIGN_RIGHT = 2
+_ALIGN_BY_NAME = {"left": ALIGN_LEFT, "center": ALIGN_CENTER, "right": ALIGN_RIGHT}
+
+# Bit positions in the per-element flags byte.
+FLAG_CHECKABLE = 1 << 0
+FLAG_CHECKED = 1 << 1
+FLAG_UNDERLINE = 1 << 2
+FLAG_STRIKETHROUGH = 1 << 3
+_ALIGN_SHIFT = 4
+_ALIGN_MASK = 0b11 << _ALIGN_SHIFT
 
 
-def _font_scale_for(font_size_px: int) -> int:
-    """Design fontSize (px) -> firmware's integer glyph scale. firmware/src/rasterizer.c
-    only knows how to pixel-double/triple/... the one hand-authored 8px bitmap font, not
-    render arbitrary point sizes, so this rounds to the nearest whole multiple and clamps
-    to what the wire format (and a 400x300 panel) can sensibly carry."""
-    scale = round(font_size_px / FONT_GLYPH_PX)
-    return max(FONT_SCALE_MIN, min(FONT_SCALE_MAX, scale))
+def _font_id_for(font_size_px: int, bold: bool) -> int:
+    """Design fontSize (px) + weight -> the wire's font_id.
+
+    font_id is `size_index + (len(FONT_SIZES) if bold else 0)`, matching hs_font_id() in
+    firmware/src/fonts/hs_fonts.h. Weight lives in font_id rather than in a separate flag
+    bit precisely so there is one authority on which font gets used.
+
+    Sizes are snapped to the nearest ladder entry. The design editor only offers ladder
+    values (frontend/src/lib/layout.js), so this normally does nothing — it matters for
+    designs saved before the ladder existed, which can hold any px value.
+    """
+    nearest = min(range(len(FONT_SIZES)), key=lambda i: abs(FONT_SIZES[i] - font_size_px))
+    return nearest + (len(FONT_SIZES) if bold else 0)
+
+
+def font_id_to_size_and_weight(font_id: int) -> tuple[int, bool]:
+    """Inverse of _font_id_for, for decode_full_layout/MockDisplay."""
+    bold = font_id >= len(FONT_SIZES)
+    size_index = font_id - len(FONT_SIZES) if bold else font_id
+    if not 0 <= size_index < len(FONT_SIZES):
+        # Same fallback firmware's hs_font_get() applies to an out-of-range id.
+        return DEFAULT_FONT_SIZE_PX, False
+    return FONT_SIZES[size_index], bold
 
 
 def encode_full_layout(layout: dict) -> bytes:
     """Flat binary encoding of a resolved layout for a 0x01 (full) data_transfer message.
 
-    Firmware has no JSON library (docs/protocol.md's "full payload format" note already
-    calls the JSON shape a placeholder pending real rendering — this is that moment), so
-    this is the wire format it actually parses: a 1-byte format version, a 1-byte element
-    count, then one fixed-size record per element:
-      byte 0   : element_id (uint8)
-      byte 1-2 : x (uint16 LE)
-      byte 3-4 : y (uint16 LE)
-      byte 5   : flags — bit0 checkable, bit1 checked
-      byte 6   : font_scale (uint8) — integer multiple of the rasterizer's 8px glyph
-                 cell (_font_scale_for above); version-1 devices didn't have this byte
-                 at all, hence the format version bump to 2
-      byte 7   : text_len (uint8)
-      byte 8.. : text (Latin-1, not null-terminated — see below)
+    Firmware has no JSON library, so this is the wire format it actually parses: a 1-byte
+    format version, a 1-byte element count, then one variable-length record per element:
+      byte 0    : element_id (uint8)
+      bytes 1-2 : x (uint16 LE)
+      bytes 3-4 : y (uint16 LE)
+      bytes 5-6 : w (uint16 LE) — the element's box width. New in format 3, and required:
+                  `align` is meaningless on-device without knowing the box to align
+                  within, and the device previously had no idea how wide an element was.
+      byte 7    : flags — FLAG_* above, plus a 2-bit alignment field at _ALIGN_SHIFT
+      byte 8    : font_id (uint8) — index into the shared font ladder, encoding both size
+                  and weight (_font_id_for above). Replaces format 2's font_scale.
+      byte 9    : text_len (uint8)
+      bytes 10..: text (Latin-1, not null-terminated — see below)
     Capped at LAYOUT_MAX_ELEMENTS/LAYOUT_MAX_TEXT_LEN to match firmware's fixed-size
     in-RAM layout store — same sizing style as CHUNK_MAX_DIFF_ENTRIES above.
     """
@@ -164,13 +197,24 @@ def encode_full_layout(layout: dict) -> bytes:
         element_id = element["id"]
         if not (0 <= element_id <= 255):
             raise ValueError(f"element_id {element_id} out of uint8 range")
-        flags = (1 if checkable else 0) | (2 if checked else 0)
-        font_scale = _font_scale_for(int(props.get("fontSize", DEFAULT_FONT_SIZE_PX)))
+
+        align = _ALIGN_BY_NAME.get(str(props.get("align", "left")), ALIGN_LEFT)
+        flags = (
+            (FLAG_CHECKABLE if checkable else 0)
+            | (FLAG_CHECKED if checked else 0)
+            | (FLAG_UNDERLINE if props.get("underline") else 0)
+            | (FLAG_STRIKETHROUGH if props.get("strikethrough") else 0)
+            | (align << _ALIGN_SHIFT)
+        )
+        font_id = _font_id_for(
+            int(props.get("fontSize", DEFAULT_FONT_SIZE_PX)), bool(props.get("bold"))
+        )
 
         out += bytes([element_id])
         out += int(element.get("x", 0)).to_bytes(2, "little")
         out += int(element.get("y", 0)).to_bytes(2, "little")
-        out += bytes([flags, font_scale, len(text_bytes)]) + text_bytes
+        out += int(element.get("w", 0)).to_bytes(2, "little")
+        out += bytes([flags, font_id, len(text_bytes)]) + text_bytes
     return out
 
 
@@ -190,19 +234,27 @@ def decode_full_layout(data: bytes) -> dict:
         element_id = data[offset]
         x = int.from_bytes(data[offset + 1 : offset + 3], "little")
         y = int.from_bytes(data[offset + 3 : offset + 5], "little")
-        flags = data[offset + 5]
-        font_scale = data[offset + 6]
-        text_len = data[offset + 7]
-        text = data[offset + 8 : offset + 8 + text_len].decode("latin-1")
-        offset += 8 + text_len
+        w = int.from_bytes(data[offset + 5 : offset + 7], "little")
+        flags = data[offset + 7]
+        font_id = data[offset + 8]
+        text_len = data[offset + 9]
+        text = data[offset + 10 : offset + 10 + text_len].decode("latin-1")
+        offset += 10 + text_len
+        font_size, bold = font_id_to_size_and_weight(font_id)
         elements.append(
             {
                 "id": element_id,
                 "x": x,
                 "y": y,
-                "checkable": bool(flags & 1),
-                "checked": bool(flags & 2),
-                "font_scale": font_scale,
+                "w": w,
+                "checkable": bool(flags & FLAG_CHECKABLE),
+                "checked": bool(flags & FLAG_CHECKED),
+                "underline": bool(flags & FLAG_UNDERLINE),
+                "strikethrough": bool(flags & FLAG_STRIKETHROUGH),
+                "align": (flags & _ALIGN_MASK) >> _ALIGN_SHIFT,
+                "font_id": font_id,
+                "font_size": font_size,
+                "bold": bold,
                 "text": text,
             }
         )

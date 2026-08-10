@@ -1,4 +1,9 @@
-export const DEFAULT_FONT_SIZE = 16;
+// Re-exported so existing importers keep working, but the ladder is defined by the font
+// pipeline, not here: FONT_SIZES is exactly the set of sizes tools/fonts/generate.mjs
+// produced a device font for. Offering a size outside it would let someone author text
+// the panel cannot render faithfully.
+export { FONT_SIZES, DEFAULT_FONT_SIZE, snapFontSize } from "./fontMetrics.js";
+import { DEFAULT_FONT_SIZE, snapFontSize } from "./fontMetrics.js";
 
 export function emptyElement() {
   return {
@@ -64,7 +69,9 @@ export function fromLayoutJson(layout) {
     unit: el.props?.unit || "",
     precision: el.props?.precision ?? "",
     buttonIndex: el.props?.button_index ?? 0,
-    fontSize: el.props?.fontSize || DEFAULT_FONT_SIZE,
+    // Snapped, not taken verbatim: designs saved before the ladder existed can hold any
+    // px value, and the device has no font for an off-ladder size.
+    fontSize: snapFontSize(el.props?.fontSize || DEFAULT_FONT_SIZE),
     bold: !!el.props?.bold,
     align: el.props?.align || "left",
     underline: !!el.props?.underline,

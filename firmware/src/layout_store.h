@@ -18,17 +18,31 @@
 #define LAYOUT_MAX_ELEMENTS 16
 #define LAYOUT_MAX_TEXT_LEN 32
 
+/* Horizontal alignment of the text within the element's w-wide box. Values match the
+ * 2-bit field the wire format packs into flags (gateway/gateway/protocol.py's
+ * ALIGN_LEFT/CENTER/RIGHT) and the `align` strings in frontend/src/lib/layout.js. */
+typedef enum {
+	LAYOUT_ALIGN_LEFT = 0,
+	LAYOUT_ALIGN_CENTER = 1,
+	LAYOUT_ALIGN_RIGHT = 2,
+} layout_align_t;
+
 typedef struct {
 	uint8_t element_id;
 	uint16_t x;
 	uint16_t y;
+	uint16_t w; /* box width, needed to resolve `align`; added in format 3 */
 	bool checkable; /* true for button-sourced checklist rows (props.source=="button") */
 	bool checked;
-	uint8_t font_scale; /* integer multiple of rasterizer.c's 8px glyph cell — see
-			      * gateway/gateway/protocol.py::_font_scale_for. Not
-			      * range-checked here, same as x/y: rasterizer.c clamps it to a
-			      * safe range at render time rather than rejecting the whole
-			      * layout over one bad byte. */
+	bool underline;
+	bool strikethrough; /* the explicit text style, distinct from `checked` above — a
+			     * checked checklist row is struck through too, but for a
+			     * different reason (see rasterizer.c) */
+	layout_align_t align;
+	uint8_t font_id; /* index into the shared font ladder, encoding size AND weight —
+			  * see firmware/src/fonts/hs_fonts.h. Not range-checked here, same
+			  * as x/y: hs_font_get() falls back to a sane font at render time
+			  * rather than rejecting the whole layout over one bad byte. */
 	char text[LAYOUT_MAX_TEXT_LEN];
 	uint8_t text_len;
 } layout_element_t;

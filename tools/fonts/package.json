@@ -1,0 +1,13 @@
+{
+  "name": "home-screen-fonts",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Generates the LVGL C fonts the firmware renders with, plus the glyph-metrics table the frontend measures with, from one source TTF.",
+  "scripts": {
+    "generate": "node generate.mjs"
+  },
+  "devDependencies": {
+    "lv_font_conv": "^1.5.3"
+  }
+}

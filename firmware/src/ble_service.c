@@ -135,7 +135,18 @@ static ssize_t read_button_event(struct bt_conn *conn, const struct bt_gatt_attr
  * real hardware, and matches github.com/zephyrproject-rtos/zephyr issue #90111 and Nordic
  * DevZone thread 109942 on the same failure mode). A dedicated queue/thread keeps a slow
  * or stuck panel refresh from ever blocking Bluetooth's own housekeeping. */
-#define EPAPER_WORKQ_STACK_SIZE 2048
+/* 8K, not the 2K this started at. Everything submitted to this queue ends up in
+ * rasterizer_render(), which renders through LVGL — and LVGL's software renderer needs
+ * far more stack than the 8x8 bitmap font it replaced. At 2K it overflowed on the first
+ * real gateway sync: HW_STACK_PROTECTION turned that into an MPU fault, the SoC reset
+ * mid-connection, and the gateway saw a bare `BleakError: disconnected` while writing a
+ * command — no on-device log, because the console dies with the fault.
+ *
+ * Sized to match CONFIG_MAIN_STACK_SIZE (prj.conf), which had to be raised for the same
+ * reason: LVGL's init runs pre-main() on the main thread. Neither figure is measured —
+ * both are "comfortably more than LVGL seemed to need". CONFIG_THREAD_ANALYZER would
+ * give real high-water marks if this ever needs trimming for RAM. */
+#define EPAPER_WORKQ_STACK_SIZE 8192
 #define EPAPER_WORKQ_PRIORITY 10
 
 static struct k_work_q epaper_work_q;
