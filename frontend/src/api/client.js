@@ -48,6 +48,9 @@ export const api = {
       body: JSON.stringify({ full_refresh_interval_s: fullRefreshIntervalS }),
     }),
   getPayload: (displayId) => request(`/displays/${displayId}/payload`),
+  getBatteryHistory: (displayId) => request(`/displays/${displayId}/battery-history`),
+  getBatteryEstimate: (displayId, wakeIntervalS) =>
+    request(`/displays/${displayId}/battery-estimate${wakeIntervalS ? `?wake_interval_s=${wakeIntervalS}` : ""}`),
 
   listDesigns: () => request("/designs"),
   createDesign: (data) => request("/designs", { method: "POST", body: JSON.stringify(data) }),

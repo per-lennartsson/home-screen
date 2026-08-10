@@ -1,12 +1,14 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.db import ContentCache, Design, Display, ElementLiveValue, Gateway
+from app.models.db import BatteryReading, ContentCache, Design, Display, ElementLiveValue, Gateway
 from app.schemas.display import (
+    BatteryEstimateOut,
+    BatteryReadingOut,
     ButtonEventReport,
     DisplayAssign,
     DisplayCreate,
@@ -20,6 +22,7 @@ from app.schemas.display import (
     PayloadFull,
     PayloadInSync,
 )
+from app.services.battery import estimate_remaining
 from app.services.rendering import build_value_diff, find_button_element, recompute_desired_hashes
 
 router = APIRouter(prefix="/api/displays", tags=["displays"])
@@ -199,9 +202,50 @@ async def report_status(display_id: int, payload: DisplayStatusReport, db: Sessi
     display.battery_pct = payload.battery_pct
     display.battery_mv = payload.battery_mv
     display.last_seen_at = datetime.now(timezone.utc)
+    db.add(
+        BatteryReading(
+            display_id=display.id,
+            battery_pct=payload.battery_pct,
+            battery_mv=payload.battery_mv,
+            wake_interval_s=display.wake_interval_s,
+        )
+    )
     db.commit()
     db.refresh(display)
     return display
+
+
+@router.get("/{display_id}/battery-history", response_model=list[BatteryReadingOut])
+async def get_battery_history(display_id: int, db: Session = Depends(get_db)):
+    """Full logged battery history (BatteryReading, one row per /status report) for
+    charting, oldest first."""
+    display = db.get(Display, display_id)
+    if display is None:
+        raise HTTPException(status_code=404, detail="display not found")
+
+    return db.scalars(
+        select(BatteryReading)
+        .where(BatteryReading.display_id == display_id)
+        .order_by(BatteryReading.recorded_at)
+    ).all()
+
+
+@router.get("/{display_id}/battery-estimate", response_model=BatteryEstimateOut)
+async def get_battery_estimate(
+    display_id: int,
+    wake_interval_s: int | None = Query(default=None, ge=5, le=3600),
+    db: Session = Depends(get_db),
+):
+    """Estimated remaining battery life at `wake_interval_s` (defaults to the display's
+    current setting). If that exact interval hasn't been run long enough to measure its
+    own drain rate, but two or more other intervals have, this projects one instead of
+    refusing — see app/services/battery.py for the model behind "what if I switched to a
+    15-minute interval" without ever having run at 15 minutes."""
+    display = db.get(Display, display_id)
+    if display is None:
+        raise HTTPException(status_code=404, detail="display not found")
+
+    return estimate_remaining(db, display, wake_interval_s=wake_interval_s)
 
 
 @router.post("/{display_id}/button-event", response_model=DisplayOut)

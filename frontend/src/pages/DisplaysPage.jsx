@@ -21,6 +21,61 @@ const FULL_REFRESH_PRESETS = [
   { value: "604800", label: "Every week" },
 ];
 
+function BatterySparkline({ history }) {
+  if (history.length < 2) return null;
+  const w = 260;
+  const h = 48;
+  const pad = 4;
+  const mvs = history.map((r) => r.battery_mv);
+  const min = Math.min(...mvs);
+  const max = Math.max(...mvs);
+  const range = max - min || 1;
+  const points = history
+    .map((r, i) => {
+      const x = pad + (i / (history.length - 1)) * (w - pad * 2);
+      const y = pad + (1 - (r.battery_mv - min) / range) * (h - pad * 2);
+      return `${x},${y}`;
+    })
+    .join(" ");
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+      <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function batteryEstimateLabel(estimate, historyLength) {
+  if (!estimate) return null;
+  const at = `at a ${estimate.wake_interval_s}s wake interval`;
+  if (estimate.status === "insufficient_data") {
+    if (historyLength === 0) return "No battery readings logged yet.";
+    if (estimate.sample_count > 0) {
+      const span = estimate.span_hours != null ? `over ${estimate.span_hours.toFixed(2)}h so far` : "so far";
+      return (
+        `${estimate.sample_count} readings logged ${at} ${span} — not enough elapsed time yet to trust a drain ` +
+        `estimate, and no other wake intervals logged yet to project one from instead. Check back later.`
+      );
+    }
+    return `No readings logged yet ${at}, and no other wake intervals logged to project an estimate from instead.`;
+  }
+  if (estimate.status === "not_draining") {
+    return `Battery isn't trending down ${at} — no estimate yet.`;
+  }
+  const days = estimate.estimated_days_remaining;
+  const remaining = days < 1 ? `${Math.round(days * 24)} hours` : `${days.toFixed(1)} days`;
+  if (estimate.status === "modeled") {
+    return (
+      `~${remaining} remaining ${at} (projected — this display hasn't run at that interval; ` +
+      `estimate is fit from ${estimate.sample_count} readings logged at other intervals).`
+    );
+  }
+  return (
+    `~${remaining} remaining ${at}, based on ` +
+    `${estimate.drain_mv_per_hour.toFixed(2)} mV/hour drain over ${estimate.span_hours.toFixed(1)}h of history ` +
+    `(${estimate.sample_count} readings).`
+  );
+}
+
 function warningFor(display) {
   const lowBattery = display.battery_pct != null && display.battery_pct < LOW_BATTERY_PCT;
   const hoursSinceSeen = display.last_seen_at
@@ -57,6 +112,10 @@ export default function DisplaysPage() {
   const [refreshingNowFor, setRefreshingNowFor] = useState(null);
   const [detailsFor, setDetailsFor] = useState(null);
   const [payload, setPayload] = useState(null);
+  const [batteryLogFor, setBatteryLogFor] = useState(null);
+  const [batteryHistory, setBatteryHistory] = useState([]);
+  const [batteryEstimate, setBatteryEstimate] = useState(null);
+  const [estimateIntervalDraft, setEstimateIntervalDraft] = useState(15);
 
   const cardRefs = useRef({});
 
@@ -199,6 +258,34 @@ export default function DisplaysPage() {
     try {
       await api.deleteDisplay(display.id);
       refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  const toggleBatteryLog = async (display) => {
+    if (batteryLogFor === display.id) {
+      setBatteryLogFor(null);
+      return;
+    }
+    try {
+      const [history, estimate] = await Promise.all([
+        api.getBatteryHistory(display.id),
+        api.getBatteryEstimate(display.id),
+      ]);
+      setBatteryHistory(history);
+      setBatteryEstimate(estimate);
+      setEstimateIntervalDraft(display.wake_interval_s);
+      setBatteryLogFor(display.id);
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  const updateBatteryEstimate = async (displayId) => {
+    setError(null);
+    try {
+      setBatteryEstimate(await api.getBatteryEstimate(displayId, +estimateIntervalDraft));
     } catch (e) {
       setError(e.message);
     }
@@ -438,6 +525,44 @@ export default function DisplaysPage() {
                   </div>
                 )}
 
+                {batteryLogFor === d.id && (
+                  <div className="entity-card-body">
+                    <div className="field">
+                      <label>Battery log</label>
+                      {batteryHistory.length >= 2 ? (
+                        <div className="muted" style={{ color: "var(--fg)" }}>
+                          <BatterySparkline history={batteryHistory} />
+                        </div>
+                      ) : (
+                        <div className="muted">Not enough readings yet to chart — check back after a few wake cycles.</div>
+                      )}
+                      <div className="muted" style={{ marginTop: 4 }}>
+                        {batteryEstimateLabel(batteryEstimate, batteryHistory.length)}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 8 }}>
+                        <input
+                          type="number"
+                          min={5}
+                          max={3600}
+                          value={estimateIntervalDraft}
+                          onChange={(e) => setEstimateIntervalDraft(e.target.value)}
+                          style={{ width: 90 }}
+                        />
+                        <span className="muted" style={{ fontSize: "12.5px" }}>
+                          seconds
+                        </span>
+                        <button type="button" className="btn small" onClick={() => updateBatteryEstimate(d.id)}>
+                          Estimate for this interval
+                        </button>
+                      </div>
+                      <div className="muted" style={{ marginTop: 4 }}>
+                        Estimate battery life for a wake interval you haven't used yet (e.g. 900s for 15 minutes) —
+                        projected from drain rates measured at whichever intervals this panel has actually run at.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {editingFullRefreshFor === d.id && (
                   <div className="entity-card-body">
                     <div className="field">
@@ -509,6 +634,14 @@ export default function DisplaysPage() {
                     onClick={() => startEditingFullRefresh(d)}
                   >
                     Refresh schedule
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary small"
+                    title="View logged battery history and an estimated remaining life"
+                    onClick={() => toggleBatteryLog(d)}
+                  >
+                    Battery log
                   </button>
                   <button type="button" className="btn ghost" onClick={() => toggleDetails(d.id)}>
                     Details

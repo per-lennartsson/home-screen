@@ -75,6 +75,32 @@ class DisplayOut(BaseModel):
     full_refresh_due: bool
 
 
+class BatteryReadingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    battery_pct: int
+    battery_mv: int
+    wake_interval_s: int
+    recorded_at: datetime
+
+
+class BatteryEstimateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    # "ok": drain rate measured directly from readings logged at wake_interval_s itself.
+    # "modeled": wake_interval_s has no readings of its own, but readings at two or more
+    # other intervals let app/services/battery.py project a rate for it (e.g. "what if I
+    # switched to 15 minutes"). "insufficient_data": neither was possible yet.
+    # "not_draining": slope is flat or rising (e.g. USB-powered, or noise) — no sensible
+    # days-remaining number to report.
+    status: Literal["ok", "modeled", "insufficient_data", "not_draining"]
+    wake_interval_s: int
+    drain_mv_per_hour: float | None = None
+    estimated_days_remaining: float | None = None
+    sample_count: int
+    span_hours: float | None = None
+
+
 class PayloadInSync(BaseModel):
     in_sync: Literal[True] = True
 

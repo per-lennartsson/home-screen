@@ -113,6 +113,9 @@ class Display(Base):
 
     gateway: Mapped[Gateway | None] = relationship(back_populates="displays")
     design: Mapped[Design | None] = relationship(back_populates="displays")
+    battery_readings: Mapped[list["BatteryReading"]] = relationship(
+        back_populates="display", cascade="all, delete-orphan"
+    )
 
     @property
     def in_sync(self) -> bool:
@@ -136,6 +139,26 @@ class Display(Base):
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         elapsed = (now - self.last_full_refresh_at).total_seconds()
         return elapsed >= self.full_refresh_interval_s
+
+
+class BatteryReading(Base):
+    """Historical log of battery_pct/battery_mv, one row per /status report (see
+    api/displays.py's report_status) — Display.battery_pct/battery_mv only ever hold the
+    latest value, this table is what battery history/estimate
+    (app/services/battery.py) reads from. wake_interval_s is captured per-reading
+    (rather than joined off Display at read time) because drain rate depends heavily on
+    it and the display's current setting can change after a reading was logged."""
+
+    __tablename__ = "battery_readings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    display_id: Mapped[int] = mapped_column(ForeignKey("displays.id"), index=True)
+    battery_pct: Mapped[int] = mapped_column()
+    battery_mv: Mapped[int] = mapped_column()
+    wake_interval_s: Mapped[int] = mapped_column()
+    recorded_at: Mapped[datetime] = mapped_column(default=_utcnow, index=True)
+
+    display: Mapped["Display"] = relationship(back_populates="battery_readings")
 
 
 class ContentCache(Base):
