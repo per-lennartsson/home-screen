@@ -7,10 +7,11 @@
 
 LOG_MODULE_REGISTER(layout_store, CONFIG_LOG_DEFAULT_LEVEL);
 
-#define FULL_LAYOUT_FORMAT_VERSION 1
-/* id(1) + x(2 LE) + y(2 LE) + flags(1) + text_len(1) = 7 bytes before the text itself —
- * must match gateway/gateway/protocol.py::encode_full_layout's per-element record. */
-#define ELEMENT_HEADER_LEN 7
+#define FULL_LAYOUT_FORMAT_VERSION 2
+/* id(1) + x(2 LE) + y(2 LE) + flags(1) + font_scale(1) + text_len(1) = 8 bytes before
+ * the text itself — must match gateway/gateway/protocol.py::encode_full_layout's
+ * per-element record. */
+#define ELEMENT_HEADER_LEN 8
 
 static layout_t layout;
 
@@ -51,7 +52,7 @@ bool layout_store_apply_full(const uint8_t *data, size_t len)
 			return false;
 		}
 
-		uint8_t text_len = data[offset + 6];
+		uint8_t text_len = data[offset + 7];
 		if (text_len > LAYOUT_MAX_TEXT_LEN || offset + ELEMENT_HEADER_LEN + text_len > len) {
 			LOG_WRN("layout_store: malformed/oversized text at element index %u", i);
 			return false;
@@ -64,6 +65,7 @@ bool layout_store_apply_full(const uint8_t *data, size_t len)
 		uint8_t flags = data[offset + 5];
 		el->checkable = (flags & 0x01) != 0;
 		el->checked = (flags & 0x02) != 0;
+		el->font_scale = data[offset + 6];
 		memcpy(el->text, &data[offset + ELEMENT_HEADER_LEN], text_len);
 		el->text_len = text_len;
 

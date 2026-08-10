@@ -32,12 +32,12 @@ static size_t hex_to_bytes(const char *hex, uint8_t *out)
 }
 
 /* Generated from gateway/gateway/protocol.py::encode_full_layout for a layout with one
- * plain text element ("Hello", not checkable) and one button-sourced checklist row
- * ("Take out trash", checkable, initially unchecked) — see the command in
- * firmware/tests/run.sh's header comment for how to regenerate this if the wire format
- * ever changes. */
+ * plain text element ("Hello", not checkable, default fontSize -> font_scale 2) and one
+ * button-sourced checklist row ("Take out trash", checkable, initially unchecked,
+ * fontSize=32 -> font_scale 4) — see the command in firmware/tests/run.sh's header
+ * comment for how to regenerate this if the wire format ever changes. */
 static const char *FULL_LAYOUT_HEX =
-	"01020100000000000548656c6c6f0200001400010e54616b65206f7574207472617368";
+	"0202010000000000020548656c6c6f020000140001040e54616b65206f7574207472617368";
 
 static void test_apply_full_matches_python_reference(void)
 {
@@ -56,6 +56,7 @@ static void test_apply_full_matches_python_reference(void)
 	CHECK(el0->x == 0 && el0->y == 0, "element 0 position should be (0, 0)");
 	CHECK(!el0->checkable, "plain text element should not be checkable");
 	CHECK(!el0->checked, "plain text element should not be checked");
+	CHECK(el0->font_scale == 2, "element 0 font_scale should be 2 (default fontSize 16 / 8px cell)");
 	CHECK(el0->text_len == 5 && memcmp(el0->text, "Hello", 5) == 0,
 	      "element 0 text should be 'Hello'");
 
@@ -64,6 +65,7 @@ static void test_apply_full_matches_python_reference(void)
 	CHECK(el1->x == 0 && el1->y == 20, "element 1 position should be (0, 20)");
 	CHECK(el1->checkable, "button-sourced element should be checkable");
 	CHECK(!el1->checked, "button-sourced element should start unchecked");
+	CHECK(el1->font_scale == 4, "element 1 font_scale should be 4 (fontSize 32 / 8px cell)");
 	CHECK(el1->text_len == 14 && memcmp(el1->text, "Take out trash", 14) == 0,
 	      "element 1 text should be 'Take out trash'");
 }
@@ -134,13 +136,13 @@ static void test_malformed_full_payload_is_rejected_without_corrupting_state(voi
 	layout_store_reset();
 	layout_store_apply_full(good, good_len);
 
-	uint8_t truncated[] = {0x01, 0x02, 0x01}; /* claims 2 elements, header cut off */
+	uint8_t truncated[] = {0x02, 0x02, 0x01}; /* valid version, claims 2 elements, header cut off */
 	bool ok = layout_store_apply_full(truncated, sizeof(truncated));
 	CHECK(!ok, "truncated full payload should be rejected");
 	CHECK(layout_store_get()->count == 2,
 	      "a rejected full payload must leave the previously-retained layout untouched");
 
-	uint8_t bad_version[] = {0x02, 0x00};
+	uint8_t bad_version[] = {0x03, 0x00};
 	CHECK(!layout_store_apply_full(bad_version, sizeof(bad_version)),
 	      "unsupported format version should be rejected");
 }

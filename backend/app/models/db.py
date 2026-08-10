@@ -35,8 +35,11 @@ class Design(Base):
     # stored live in ElementLiveValue as "checked"/"unchecked", merged in by
     # rendering.resolve_layout() into a runtime-only "checked": bool prop).
     # Both "text" and "value" elements' props also carry "fontSize": int (px, at the
-    # design's authored resolution) — purely a canvas-preview concern until real ePaper
-    # bitmap rendering (Section 7 step 4) exists to read it.
+    # design's authored resolution, which for this project's only supported panel is
+    # 1:1 with device pixels). gateway/gateway/protocol.py::_font_scale_for() rounds it
+    # to the nearest whole multiple of the firmware's 8px glyph cell (clamped 1-8) when
+    # encoding the wire payload — so the physical display honors it, just snapped to
+    # 8px steps rather than the arbitrary sizes the canvas preview allows.
     layout_json: Mapped[dict] = mapped_column(JSON)
     # Canvas resolution this design was authored for. Defaults match the only panel this
     # system currently targets (Seeed XIAO + 4.2" 400x300 SSD1683, see firmware/README.md).

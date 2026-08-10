@@ -102,9 +102,28 @@ def encode_diff(values: dict[int, str]) -> bytes:
     return out
 
 
-FULL_LAYOUT_FORMAT_VERSION = 1
+FULL_LAYOUT_FORMAT_VERSION = 2
 LAYOUT_MAX_ELEMENTS = 16
 LAYOUT_MAX_TEXT_LEN = 32
+
+# Design-editor default (frontend/src/lib/layout.js's DEFAULT_FONT_SIZE) and the v1
+# rasterizer's native bitmap cell (firmware/src/font_basic.h — GLYPH_WIDTH/HEIGHT in
+# rasterizer.c), used below to turn an authored pixel size into the wire's integer
+# font_scale. 1 design px isn't 1 device px in general, but this project's only
+# supported panel and only Design default (400x300) currently make it so.
+DEFAULT_FONT_SIZE_PX = 16
+FONT_GLYPH_PX = 8
+FONT_SCALE_MIN = 1
+FONT_SCALE_MAX = 8  # 64px glyphs — already more than half a 300px-tall panel
+
+
+def _font_scale_for(font_size_px: int) -> int:
+    """Design fontSize (px) -> firmware's integer glyph scale. firmware/src/rasterizer.c
+    only knows how to pixel-double/triple/... the one hand-authored 8px bitmap font, not
+    render arbitrary point sizes, so this rounds to the nearest whole multiple and clamps
+    to what the wire format (and a 400x300 panel) can sensibly carry."""
+    scale = round(font_size_px / FONT_GLYPH_PX)
+    return max(FONT_SCALE_MIN, min(FONT_SCALE_MAX, scale))
 
 
 def encode_full_layout(layout: dict) -> bytes:
@@ -118,8 +137,11 @@ def encode_full_layout(layout: dict) -> bytes:
       byte 1-2 : x (uint16 LE)
       byte 3-4 : y (uint16 LE)
       byte 5   : flags — bit0 checkable, bit1 checked
-      byte 6   : text_len (uint8)
-      byte 7.. : text (Latin-1, not null-terminated — see below)
+      byte 6   : font_scale (uint8) — integer multiple of the rasterizer's 8px glyph
+                 cell (_font_scale_for above); version-1 devices didn't have this byte
+                 at all, hence the format version bump to 2
+      byte 7   : text_len (uint8)
+      byte 8.. : text (Latin-1, not null-terminated — see below)
     Capped at LAYOUT_MAX_ELEMENTS/LAYOUT_MAX_TEXT_LEN to match firmware's fixed-size
     in-RAM layout store — same sizing style as CHUNK_MAX_DIFF_ENTRIES above.
     """
@@ -133,21 +155,22 @@ def encode_full_layout(layout: dict) -> bytes:
         # Latin-1, not ASCII: firmware's rasterizer keeps one byte == one glyph column
         # (font_basic.h has no multi-byte/UTF-8 handling), and Latin-1's code points
         # 0-255 map 1:1 onto Unicode's, so this is the widest single-byte encoding that
-        # still fits that assumption. In practice it only buys one extra character over
-        # ASCII — 0xB0, the degree sign, which firmware has a dedicated glyph for
-        # (font_basic.h's font_glyph_degree) — everything else outside ASCII still isn't
-        # in the font and falls back to errors="replace"'s "?" like before.
+        # still fits that assumption. In practice it only buys a handful of extra
+        # characters over ASCII — the degree sign and Å/Ä/Ö/å/ä/ö, which firmware has
+        # dedicated glyphs for (font_basic.h) — everything else outside ASCII still
+        # isn't in the font and falls back to errors="replace"'s "?" like before.
         text_bytes = (text or "").encode("latin-1", errors="replace")[:LAYOUT_MAX_TEXT_LEN]
 
         element_id = element["id"]
         if not (0 <= element_id <= 255):
             raise ValueError(f"element_id {element_id} out of uint8 range")
         flags = (1 if checkable else 0) | (2 if checked else 0)
+        font_scale = _font_scale_for(int(props.get("fontSize", DEFAULT_FONT_SIZE_PX)))
 
         out += bytes([element_id])
         out += int(element.get("x", 0)).to_bytes(2, "little")
         out += int(element.get("y", 0)).to_bytes(2, "little")
-        out += bytes([flags, len(text_bytes)]) + text_bytes
+        out += bytes([flags, font_scale, len(text_bytes)]) + text_bytes
     return out
 
 
@@ -168,9 +191,10 @@ def decode_full_layout(data: bytes) -> dict:
         x = int.from_bytes(data[offset + 1 : offset + 3], "little")
         y = int.from_bytes(data[offset + 3 : offset + 5], "little")
         flags = data[offset + 5]
-        text_len = data[offset + 6]
-        text = data[offset + 7 : offset + 7 + text_len].decode("latin-1")
-        offset += 7 + text_len
+        font_scale = data[offset + 6]
+        text_len = data[offset + 7]
+        text = data[offset + 8 : offset + 8 + text_len].decode("latin-1")
+        offset += 8 + text_len
         elements.append(
             {
                 "id": element_id,
@@ -178,6 +202,7 @@ def decode_full_layout(data: bytes) -> dict:
                 "y": y,
                 "checkable": bool(flags & 1),
                 "checked": bool(flags & 2),
+                "font_scale": font_scale,
                 "text": text,
             }
         )

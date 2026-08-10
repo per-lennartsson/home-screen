@@ -150,17 +150,21 @@ actually parses before chunking it — `encode_full_layout` in
 `firmware/src/layout_store.c`:
 
 ```
-byte 0    : format version (currently 1)
+byte 0    : format version (currently 2)
 byte 1    : element count (uint8)
 repeated per element:
   byte 0    : element_id (uint8)
   bytes 1-2 : x (uint16 LE)
   bytes 3-4 : y (uint16 LE)
   byte 5    : flags — bit0 checkable, bit1 checked
-  byte 6    : text_len (uint8)
-  bytes 7.. : text (Latin-1, not null-terminated — one byte per rendered glyph column;
-              firmware/src/font_basic.h only covers ASCII plus one extra glyph for the
-              degree sign, 0xB0, everything else outside that falls back to a
+  byte 6    : font_scale (uint8) — integer multiple of the rasterizer's 8px glyph cell,
+              e.g. 2 for a 16px-tall design element (protocol.py's _font_scale_for());
+              added in format version 2, version-1 devices have no equivalent field
+  byte 7    : text_len (uint8)
+  bytes 8.. : text (Latin-1, not null-terminated — one byte per rendered glyph column;
+              firmware/src/font_basic.h only covers ASCII plus a few one-off extra
+              glyphs — the degree sign (0xB0) and Å/Ä/Ö/å/ä/ö (0xC4-0xD6, 0xE4-0xF6)
+              for Swedish text — everything else outside that falls back to a
               placeholder box)
 ```
 
@@ -169,4 +173,7 @@ JSON stops at the gateway because firmware has no JSON parser. Capped at 16 elem
 those caps is truncated gateway-side rather than being rejected on-device.
 
 Rasterizing that into pixels is firmware's job (`src/rasterizer.c`) — a minimal
-fixed-width-font renderer, not the design editor's full text styling.
+fixed-width-font renderer, not the design editor's full text styling. Font size is the
+one exception: `font_scale` pixel-multiplies the single hand-authored bitmap font, so
+sizes land on whole 8px steps (clamped 1-8, i.e. 8-64px) rather than arbitrary point
+sizes the way the canvas preview allows.

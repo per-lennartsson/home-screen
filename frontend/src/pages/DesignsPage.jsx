@@ -529,11 +529,11 @@ export default function DesignsPage() {
                 <div className="inspector-row">
                   <label className="muted">Size</label>
                   <div className="stepper">
-                    <button type="button" onClick={() => updateSelected({ fontSize: Math.max(8, (selected.fontSize || DEFAULT_FONT_SIZE) - 2) })}>
+                    <button type="button" onClick={() => updateSelected({ fontSize: Math.max(8, (selected.fontSize || DEFAULT_FONT_SIZE) - 8) })}>
                       −
                     </button>
                     <span className="value">{selected.fontSize || DEFAULT_FONT_SIZE}</span>
-                    <button type="button" onClick={() => updateSelected({ fontSize: Math.min(72, (selected.fontSize || DEFAULT_FONT_SIZE) + 2) })}>
+                    <button type="button" onClick={() => updateSelected({ fontSize: Math.min(64, (selected.fontSize || DEFAULT_FONT_SIZE) + 8) })}>
                       ＋
                     </button>
                   </div>

@@ -1,9 +1,11 @@
 /*
  * Minimal v1 rasterizer (see the plan for this feature / firmware/README.md): draws the
  * layout_store's retained elements into a 1bpp framebuffer. Deliberately narrow scope —
- * fixed-width bitmap font (font_basic.h), plain left-aligned text, no word-wrap, no
- * bold/underline/other props, no partial-refresh optimization (every apply is a full
- * redraw). Extending this to the design editor's full text styling is future work.
+ * one fixed-width bitmap font (font_basic.h), pixel-multiplied per element by its
+ * font_scale (layout_store.h) rather than a real scalable font, plain left-aligned
+ * text, no word-wrap, no bold/underline/other props, no partial-refresh optimization
+ * (every apply is a full redraw). Extending this to the design editor's full text
+ * styling is future work.
  */
 
 #ifndef RASTERIZER_H_

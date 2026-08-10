@@ -24,6 +24,11 @@ typedef struct {
 	uint16_t y;
 	bool checkable; /* true for button-sourced checklist rows (props.source=="button") */
 	bool checked;
+	uint8_t font_scale; /* integer multiple of rasterizer.c's 8px glyph cell — see
+			      * gateway/gateway/protocol.py::_font_scale_for. Not
+			      * range-checked here, same as x/y: rasterizer.c clamps it to a
+			      * safe range at render time rather than rejecting the whole
+			      * layout over one bad byte. */
 	char text[LAYOUT_MAX_TEXT_LEN];
 	uint8_t text_len;
 } layout_element_t;

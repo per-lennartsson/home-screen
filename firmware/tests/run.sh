@@ -25,3 +25,10 @@ cc -std=c11 -Wall -Wextra \
   -o /tmp/layout_store_native_test
 
 /tmp/layout_store_native_test
+
+cc -std=c11 -Wall -Wextra \
+  -I ../src -I shims \
+  ../src/layout_store.c ../src/rasterizer.c test_rasterizer.c \
+  -o /tmp/rasterizer_native_test
+
+/tmp/rasterizer_native_test

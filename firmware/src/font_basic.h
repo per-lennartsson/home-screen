@@ -100,4 +100,15 @@ static const uint8_t font_glyphs[FONT_GLYPH_COUNT][8] = {
  * character. */
 static const uint8_t font_glyph_degree[8] = {0x00, 0x60, 0x90, 0x90, 0x60, 0x00, 0x00, 0x00};
 
+/* Å/Ä/Ö (Latin-1 0xC5/0xC4/0xD6) — needed for Swedish room/label text (this project's
+ * primary UI language), same one-off treatment as font_glyph_degree rather than
+ * widening font_glyphs from 'Z' up to 0xC4. Lowercase å/ä/ö (0xE5/0xE4/0xF6) fold to
+ * these same glyphs in rasterizer.c's to_glyph_index, mirroring the a-z->A-Z fold
+ * already done there for plain ASCII. The base letter shapes are compressed by one or
+ * two rows (vs. their plain 'A'/'O' counterparts) to leave room for the diacritic
+ * without growing past the shared 8-row cell. */
+static const uint8_t font_glyph_a_ring[8] = {0x20, 0x50, 0x60, 0x90, 0xF0, 0x90, 0x90, 0x00};
+static const uint8_t font_glyph_a_diaeresis[8] = {0x50, 0x60, 0x90, 0xF0, 0x90, 0x90, 0x90, 0x00};
+static const uint8_t font_glyph_o_diaeresis[8] = {0x50, 0x70, 0x88, 0x88, 0x88, 0x88, 0x70, 0x00};
+
 #endif /* FONT_BASIC_H_ */
