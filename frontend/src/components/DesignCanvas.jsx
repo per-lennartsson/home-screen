@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { formatEntityValue } from "../lib/format.js";
 import { DEFAULT_FONT_SIZE } from "../lib/layout.js";
 import { entityValueKey } from "../lib/useEntityValues.js";
 
@@ -8,7 +9,7 @@ export function elementLabel(el, entityValues) {
     if (!el.entityId) return "⌂ (no entity)";
     const cached = entityValues[entityValueKey(el.entityId, el.attribute)];
     if (!cached) return "⌂ …";
-    return cached.error ? `⌂ ${cached.error}` : cached.value;
+    return cached.error ? `⌂ ${cached.error}` : formatEntityValue(cached.value, el);
   }
   return el.value || "(empty value)";
 }

@@ -45,20 +45,39 @@ def structure_signature_for(layout: dict) -> int:
     return crc32_of(canonical_json_bytes(_structure_only(layout)))
 
 
+def _format_value(raw: str | None, unit: str | None, precision) -> str | None:
+    """Applies a home_assistant element's "unit" and "precision" props to its raw
+    fetched state - same display-time formatting HA's own entity "Display precision"
+    setting does. Rounding only applies when the raw state parses as a number;
+    non-numeric states (e.g. "on"/"off") pass through untouched but can still get a
+    unit suffix appended."""
+    if raw is None:
+        return None
+    text = raw
+    if precision not in (None, ""):
+        try:
+            text = f"{float(raw):.{int(precision)}f}"
+        except ValueError:
+            text = raw
+    return f"{text} {unit}" if unit else text
+
+
 def resolve_layout(layout: dict, live_values: dict[int, str]) -> dict:
     """Merge live_values (element_id -> latest fetched value) into a copy of the
     layout template. Static value elements pass through untouched; externally-sourced
-    ones get their current value substituted in, or None if nothing's been fetched yet.
-    Button elements are similar but bind a runtime-only "checked" bool instead of
-    replacing "value" - their label text is always static, only the checked state is
-    live (see ElementLiveValue's "checked"/"unchecked" sentinel strings)."""
+    ones get their current value substituted in (formatted per the element's "unit"
+    and "precision" props), or None if nothing's been fetched yet. Button elements are
+    similar but bind a runtime-only "checked" bool instead of replacing "value" - their
+    label text is always static, only the checked state is live (see
+    ElementLiveValue's "checked"/"unchecked" sentinel strings)."""
     resolved = deepcopy(layout)
     for element in resolved.get("elements", []):
         if element.get("type") != "value":
             continue
         props = element.setdefault("props", {})
         if props.get("source") == "home_assistant":
-            props["value"] = live_values.get(element.get("id"))
+            raw = live_values.get(element.get("id"))
+            props["value"] = _format_value(raw, props.get("unit"), props.get("precision"))
         elif props.get("source") == "button":
             props["checked"] = live_values.get(element.get("id")) == "checked"
     return resolved

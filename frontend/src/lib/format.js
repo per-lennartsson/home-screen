@@ -15,6 +15,20 @@ export function parseUtc(isoString) {
   return new Date(hasOffset ? isoString : `${isoString}Z`);
 }
 
+// Applies a value element's display precision (rounds numeric states to N decimals,
+// same rounding HA's own "Display precision" entity setting does) and appends its unit
+// of measurement suffix. Non-numeric states pass through precision untouched — a unit
+// can still be appended (e.g. a text sensor with a custom unit).
+export function formatEntityValue(rawValue, { unit, precision } = {}) {
+  if (rawValue == null) return rawValue;
+  let text = rawValue;
+  if (precision !== undefined && precision !== null && precision !== "") {
+    const num = Number(rawValue);
+    if (!Number.isNaN(num)) text = num.toFixed(Number(precision));
+  }
+  return unit ? `${text} ${unit}` : text;
+}
+
 export function relativeTime(isoString) {
   if (!isoString) return "never";
   const seconds = (Date.now() - parseUtc(isoString).getTime()) / 1000;

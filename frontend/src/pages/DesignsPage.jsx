@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client.js";
 import DesignCanvas, { elementLabel } from "../components/DesignCanvas.jsx";
-import { relativeTime } from "../lib/format.js";
+import { formatEntityValue, relativeTime } from "../lib/format.js";
 import { DEFAULT_FONT_SIZE, emptyElement, fromLayoutJson, haEntityRefs, toLayoutJson } from "../lib/layout.js";
 import { entityValueKey, useEntityValues } from "../lib/useEntityValues.js";
 
@@ -450,6 +450,27 @@ export default function DesignsPage() {
                           placeholder="defaults to state"
                         />
                       </div>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label>Unit of measurement</label>
+                        <input
+                          value={selected.unit}
+                          onChange={(e) => updateSelected({ unit: e.target.value })}
+                          placeholder="e.g. °C — appended to the value"
+                        />
+                      </div>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label>Display precision</label>
+                        <select
+                          value={selected.precision}
+                          onChange={(e) => updateSelected({ precision: e.target.value })}
+                        >
+                          <option value="">Default</option>
+                          <option value="0">0</option>
+                          <option value="1">1</option>
+                          <option value="2">2</option>
+                          <option value="3">3</option>
+                        </select>
+                      </div>
                       {selected.entityId &&
                         (() => {
                           const cached = entityValues[entityValueKey(selected.entityId, selected.attribute)];
@@ -459,7 +480,8 @@ export default function DesignsPage() {
                             <div className="inspector-live">
                               <span className="status-dot ok" />
                               <span>
-                                Reads {cached.value} · updated {relativeTime(cached.fetchedAt)}
+                                Reads {formatEntityValue(cached.value, selected)} · updated{" "}
+                                {relativeTime(cached.fetchedAt)}
                               </span>
                             </div>
                           );

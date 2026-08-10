@@ -12,6 +12,8 @@ export function emptyElement() {
     value: "",
     entityId: "",
     attribute: "",
+    unit: "",
+    precision: "",
     buttonIndex: 0,
     fontSize: DEFAULT_FONT_SIZE,
     bold: false,
@@ -32,6 +34,8 @@ export function toLayoutJson(elements) {
       } else if (el.source === "home_assistant") {
         props = { source: "home_assistant", entity_id: el.entityId };
         if (el.attribute) props.attribute = el.attribute;
+        if (el.unit) props.unit = el.unit;
+        if (el.precision !== "" && el.precision != null) props.precision = Number(el.precision);
       } else {
         props = { source: "static", value: el.value };
       }
@@ -57,6 +61,8 @@ export function fromLayoutJson(layout) {
     value: el.props?.value || "",
     entityId: el.props?.entity_id || "",
     attribute: el.props?.attribute || "",
+    unit: el.props?.unit || "",
+    precision: el.props?.precision ?? "",
     buttonIndex: el.props?.button_index ?? 0,
     fontSize: el.props?.fontSize || DEFAULT_FONT_SIZE,
     bold: !!el.props?.bold,
