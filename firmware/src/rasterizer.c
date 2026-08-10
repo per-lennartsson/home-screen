@@ -49,16 +49,13 @@ static void set_pixel(int x, int y, bool black)
 		return; /* silently clip — an out-of-range layout must never corrupt memory */
 	}
 
-	/* The panel comes out horizontally mirrored: the SSD1683's Driver Output Control
-	 * (0x01) only exposes a gate (Y) scan direction, so the S0..S399 source wiring
-	 * direction cannot be corrected from a register and has to be undone here.
-	 *
-	 * rotate_180 asks for the whole image rotated 180° on top of that. Working through
-	 * the two reflections: a point that lands at device column (WIDTH-1-x) unrotated
-	 * lands at column x once the panel is physically rotated in its mount — the mount's
-	 * rotation cancels the hardware mirror — so rotate_180 skips the x mirror and flips
-	 * y instead. */
-	int device_x = target_rotate_180 ? x : (EPD_WIDTH - 1 - x);
+	/* rotate_180 (per-display mounting setting) flips the whole image top-to-bottom so
+	 * it reads right-side up when the panel is physically mounted rotated in its
+	 * enclosure. X is never flipped here — real-hardware testing showed the SSD1683's
+	 * source wiring does not need software correction; an earlier version of this
+	 * function assumed it did and mirrored X unconditionally, which produced
+	 * mirror-written text on real panels. */
+	int device_x = x;
 	int device_y = target_rotate_180 ? (EPD_HEIGHT - 1 - y) : y;
 	size_t byte_index = (size_t)device_y * EPD_WIDTH_BYTES + (size_t)device_x / 8;
 
