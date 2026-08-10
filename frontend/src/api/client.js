@@ -16,9 +16,11 @@ async function request(path, options = {}) {
 export const api = {
   listGateways: () => request("/gateways"),
   createGateway: (data) => request("/gateways", { method: "POST", body: JSON.stringify(data) }),
+  deleteGateway: (id) => request(`/gateways/${id}`, { method: "DELETE" }),
 
   listDisplays: () => request("/displays"),
   createDisplay: (data) => request("/displays", { method: "POST", body: JSON.stringify(data) }),
+  deleteDisplay: (id) => request(`/displays/${id}`, { method: "DELETE" }),
   assignDesign: (displayId, designId) =>
     request(`/displays/${displayId}/assign`, {
       method: "POST",
@@ -29,11 +31,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ gateway_id: gatewayId }),
     }),
+  setRotation: (displayId, rotate180) =>
+    request(`/displays/${displayId}/rotate`, {
+      method: "POST",
+      body: JSON.stringify({ rotate_180: rotate180 }),
+    }),
   getPayload: (displayId) => request(`/displays/${displayId}/payload`),
 
   listDesigns: () => request("/designs"),
   createDesign: (data) => request("/designs", { method: "POST", body: JSON.stringify(data) }),
   updateDesign: (id, data) => request(`/designs/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteDesign: (id) => request(`/designs/${id}`, { method: "DELETE" }),
 
   getHomeAssistantConfig: () => request("/integrations/home-assistant"),
   setHomeAssistantConfig: (data) =>

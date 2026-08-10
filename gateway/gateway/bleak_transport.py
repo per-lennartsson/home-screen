@@ -104,8 +104,9 @@ class BleakConnection(BleConnection):
         await self._client.write_gatt_char(uuids.DATA_TRANSFER_CHAR_UUID, chunk, response=True)
 
     async def write_command(self, command: int) -> None:
-        """Not used by the sync loop (spec 5.1 has no command step) — here for the
-        diagnostics in __main__.py, e.g. triggering IDENTIFY on a specific display."""
+        """Used by sync.py to assert a display's rotate_180 setting every sync, and by
+        the diagnostics in __main__.py (e.g. triggering IDENTIFY on a specific
+        display)."""
         await self._client.write_gatt_char(uuids.COMMAND_CHAR_UUID, bytes([command]), response=True)
 
     @property

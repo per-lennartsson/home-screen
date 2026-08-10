@@ -9,6 +9,7 @@
 #ifndef RASTERIZER_H_
 #define RASTERIZER_H_
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -19,7 +20,12 @@
  * line sized to that element's actual rendered text width. framebuffer must be at least
  * EPD_FRAMEBUFFER_SIZE (epaper_ssd1683.h) bytes, 1bpp MSB-first, bit=1 white/bit=0
  * black per the SSD1683's Write RAM(BW) convention — matches what epd_ssd1683_push_full
- * expects directly. */
-void rasterizer_render(uint8_t *framebuffer, size_t framebuffer_len, const layout_t *layout);
+ * expects directly.
+ *
+ * rotate_180: per-display mounting setting (see epaper_set_rotation) — rotates the
+ * whole rendered image 180° so it reads right-side up when the panel itself is mounted
+ * rotated in its enclosure. */
+void rasterizer_render(uint8_t *framebuffer, size_t framebuffer_len, const layout_t *layout,
+			bool rotate_180);
 
 #endif /* RASTERIZER_H_ */

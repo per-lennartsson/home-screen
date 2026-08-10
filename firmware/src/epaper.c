@@ -28,6 +28,7 @@
 LOG_MODULE_REGISTER(epaper, CONFIG_LOG_DEFAULT_LEVEL);
 
 static uint8_t framebuffer[EPD_FRAMEBUFFER_SIZE];
+static bool current_rotate_180;
 
 static bool push_blank_frame(void)
 {
@@ -58,7 +59,7 @@ bool epaper_apply_full(const uint8_t *data, size_t len)
 		return false;
 	}
 
-	rasterizer_render(framebuffer, sizeof(framebuffer), layout_store_get());
+	rasterizer_render(framebuffer, sizeof(framebuffer), layout_store_get(), current_rotate_180);
 	return epd_ssd1683_push_full(framebuffer, sizeof(framebuffer)) == 0;
 }
 
@@ -82,7 +83,7 @@ bool epaper_apply_diff(const uint8_t *data, size_t len)
 	/* v1 scope: full refresh even for a diff — no partial-refresh optimization yet
 	 * (see rasterizer.h's scope note). Still correct, just not the fastest/lowest-
 	 * power path a future version could take. */
-	rasterizer_render(framebuffer, sizeof(framebuffer), layout_store_get());
+	rasterizer_render(framebuffer, sizeof(framebuffer), layout_store_get(), current_rotate_180);
 	return epd_ssd1683_push_full(framebuffer, sizeof(framebuffer)) == 0;
 }
 
@@ -94,4 +95,14 @@ void epaper_force_full_refresh(void)
 void epaper_identify(void)
 {
 	epd_ssd1683_identify();
+}
+
+void epaper_set_rotation(bool rotate_180)
+{
+	if (rotate_180 == current_rotate_180) {
+		return; /* gateway resends this every sync, whether or not it changed */
+	}
+	current_rotate_180 = rotate_180;
+	rasterizer_render(framebuffer, sizeof(framebuffer), layout_store_get(), current_rotate_180);
+	epd_ssd1683_push_full(framebuffer, sizeof(framebuffer));
 }

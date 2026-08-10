@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.db import Design
+from app.models.db import ContentCache, Design, Display
 from app.schemas.design import DesignCreate, DesignOut, DesignUpdate
 from app.services.rendering import recompute_desired_hashes
 
@@ -60,3 +60,17 @@ async def update_design(design_id: int, payload: DesignUpdate, db: Session = Dep
     recompute_desired_hashes(db, design)
     db.refresh(design)
     return design
+
+
+@router.delete("/{design_id}", status_code=204)
+async def delete_design(design_id: int, db: Session = Depends(get_db)):
+    design = db.get(Design, design_id)
+    if design is None:
+        raise HTTPException(status_code=404, detail="design not found")
+    if db.scalar(select(Display).where(Display.design_id == design_id)):
+        raise HTTPException(status_code=409, detail="design has assigned displays; unassign them first")
+
+    for cache_entry in db.scalars(select(ContentCache).where(ContentCache.design_id == design_id)):
+        db.delete(cache_entry)
+    db.delete(design)  # cascades ElementLiveValue rows via the model's relationship
+    db.commit()

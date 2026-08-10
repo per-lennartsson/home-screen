@@ -28,6 +28,18 @@ async def list_gateways(db: Session = Depends(get_db)):
     return db.scalars(select(Gateway)).all()
 
 
+@router.delete("/{gateway_id}", status_code=204)
+async def delete_gateway(gateway_id: int, db: Session = Depends(get_db)):
+    gateway = db.get(Gateway, gateway_id)
+    if gateway is None:
+        raise HTTPException(status_code=404, detail="gateway not found")
+    if db.scalar(select(Display).where(Display.gateway_id == gateway_id)):
+        raise HTTPException(status_code=409, detail="gateway has assigned displays; unassign them first")
+
+    db.delete(gateway)
+    db.commit()
+
+
 @router.get("/{gateway_id}/assigned-displays", response_model=list[DisplayOut])
 async def assigned_displays(gateway_id: int, db: Session = Depends(get_db)):
     gateway = db.get(Gateway, gateway_id)

@@ -11,7 +11,9 @@
  * rasterizer.c (the retained text itself keeps its real case — only the glyph choice is
  * affected), so real checklist labels still render legibly without doubling the table.
  * Anything outside this range (rasterizer.c's to_glyph_index() returns 0xFF for it)
- * draws as a small placeholder box instead of silently picking the wrong glyph.
+ * draws as a small placeholder box instead of silently picking the wrong glyph — except
+ * Latin-1 0xB0 (degree sign), which gets its own one-off glyph below (font_glyph_degree)
+ * since it's common enough (temperature values) to be worth the one extra entry.
  *
  * Each glyph is 8 rows x 8 columns, MSB-first (bit 7 = leftmost column), glyph pixels
  * confined to columns 0-4 (bits 7-3) so column 5-7 (bits 2-0, always 0 here) provide
@@ -89,5 +91,13 @@ static const uint8_t font_glyphs[FONT_GLYPH_COUNT][8] = {
 	/* 'Y' 0x59 */ {0x88, 0x88, 0x50, 0x20, 0x20, 0x20, 0x20, 0x00},
 	/* 'Z' 0x5A */ {0xF8, 0x08, 0x10, 0x20, 0x40, 0x80, 0xF8, 0x00},
 };
+
+/* One glyph outside the contiguous table above, for Latin-1 0xB0 (degree sign) —
+ * "?C"/"?F" showing up instead of "°C"/"°F" was the ASCII-only wire encoding
+ * (gateway/gateway/protocol.py) replacing it, now fixed to carry Latin-1 through
+ * instead (see rasterizer.c's to_glyph_index). A small raised ring rather than
+ * widening font_glyphs all the way from 'Z' (0x5A) to 0xB0 just to reach one more
+ * character. */
+static const uint8_t font_glyph_degree[8] = {0x00, 0x60, 0x90, 0x90, 0x60, 0x00, 0x00, 0x00};
 
 #endif /* FONT_BASIC_H_ */

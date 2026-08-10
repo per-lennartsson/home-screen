@@ -20,6 +20,10 @@ class DisplayGatewayAssign(BaseModel):
     gateway_id: int
 
 
+class DisplayRotationSet(BaseModel):
+    rotate_180: bool
+
+
 class DisplayStatusReport(BaseModel):
     content_hash: int
     battery_pct: int
@@ -42,6 +46,7 @@ class DisplayOut(BaseModel):
     design_id: int | None
     width: int
     height: int
+    rotate_180: bool
     current_content_hash: int | None
     desired_content_hash: int | None
     battery_pct: int | None

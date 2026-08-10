@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import AsyncContextManager
 
-from gateway import protocol
+from gateway import protocol, uuids
 
 
 class BleConnection(ABC):
@@ -28,6 +28,10 @@ class BleConnection(ABC):
     @abstractmethod
     async def write_data_transfer(self, chunk: bytes) -> None:
         """Write one chunk to the `data_transfer` characteristic."""
+
+    @abstractmethod
+    async def write_command(self, command: int) -> None:
+        """Write one byte to the `command` characteristic (uuids.COMMAND_*)."""
 
     @abstractmethod
     async def read_button_event(self) -> int:
@@ -66,6 +70,12 @@ class MockDisplay:
         self.last_rendered: dict | None = None
         self._reassembler = protocol.ChunkReassembler()
 
+        # Mirrors firmware's epaper_set_rotation RAM state — set by write_command()
+        # below, so tests can assert the sync loop actually asserts the backend's
+        # rotate_180 setting on every connection (sync.py).
+        self.rotate_180 = False
+        self.last_command: int | None = None
+
         # Test hooks for proving retry/backoff behavior (spec 5.1 step 8).
         self.fail_next_connects = 0
         self.corrupt_next_write = False
@@ -77,6 +87,13 @@ class MockDisplay:
 
     def press_button(self, button_index: int) -> None:
         self.pending_button_mask |= 1 << button_index
+
+    def apply_command(self, command: int) -> None:
+        self.last_command = command
+        if command == uuids.COMMAND_ROTATE_180:
+            self.rotate_180 = True
+        elif command == uuids.COMMAND_ROTATE_NORMAL:
+            self.rotate_180 = False
 
     def status(self) -> dict:
         return {
@@ -131,6 +148,9 @@ class _MockConnection(BleConnection):
 
     async def write_data_transfer(self, chunk: bytes) -> None:
         self._display.apply_chunk(chunk)
+
+    async def write_command(self, command: int) -> None:
+        self._display.apply_command(command)
 
     async def read_button_event(self) -> int:
         mask = self._display.pending_button_mask

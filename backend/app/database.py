@@ -28,6 +28,12 @@ def ensure_schema_additions() -> None:
                 "ALTER TABLE home_assistant_config ADD COLUMN poll_interval_s INTEGER NOT NULL DEFAULT 30"
             )
 
+        display_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(displays)")}
+        if display_cols and "rotate_180" not in display_cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE displays ADD COLUMN rotate_180 BOOLEAN NOT NULL DEFAULT 0"
+            )
+
 
 async def get_db():
     # async def, not def: FastAPI runs sync generator dependencies through anyio's

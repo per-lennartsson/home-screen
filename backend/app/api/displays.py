@@ -12,6 +12,7 @@ from app.schemas.display import (
     DisplayCreate,
     DisplayGatewayAssign,
     DisplayOut,
+    DisplayRotationSet,
     DisplayStatusReport,
     PayloadDiff,
     PayloadFull,
@@ -55,6 +56,16 @@ async def get_display(display_id: int, db: Session = Depends(get_db)):
     return display
 
 
+@router.delete("/{display_id}", status_code=204)
+async def delete_display(display_id: int, db: Session = Depends(get_db)):
+    display = db.get(Display, display_id)
+    if display is None:
+        raise HTTPException(status_code=404, detail="display not found")
+
+    db.delete(display)
+    db.commit()
+
+
 @router.post("/{display_id}/assign", response_model=DisplayOut)
 async def assign_design(display_id: int, payload: DisplayAssign, db: Session = Depends(get_db)):
     display = db.get(Display, display_id)
@@ -88,6 +99,22 @@ async def assign_gateway(display_id: int, payload: DisplayGatewayAssign, db: Ses
         raise HTTPException(status_code=404, detail="gateway not found")
 
     display.gateway_id = payload.gateway_id
+    db.commit()
+    db.refresh(display)
+    return display
+
+
+@router.post("/{display_id}/rotate", response_model=DisplayOut)
+async def set_rotation(display_id: int, payload: DisplayRotationSet, db: Session = Depends(get_db)):
+    """Sets a display's physical mounting orientation. Purely a device-local rendering
+    transform (see Display.rotate_180) — doesn't touch content_hash/design, so the
+    gateway just re-asserts it on the next sync (gateway/gateway/sync.py) rather than
+    this endpoint needing to push anything itself."""
+    display = db.get(Display, display_id)
+    if display is None:
+        raise HTTPException(status_code=404, detail="display not found")
+
+    display.rotate_180 = payload.rotate_180
     db.commit()
     db.refresh(display)
     return display

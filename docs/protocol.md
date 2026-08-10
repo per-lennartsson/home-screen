@@ -67,7 +67,8 @@ byte 0       : number of value updates (uint8)
 repeated per update:
   byte 0     : element_id (uint8)
   byte 1     : value length (uint8)
-  bytes 2..N : value (UTF-8, not null-terminated)
+  bytes 2..N : value (Latin-1, not null-terminated — firmware draws one glyph column
+               per byte, so this must match the full payload's encoding; see below)
 ```
 
 The gateway translates the JSON diff payload from `/api/displays/{id}/payload` into this
@@ -157,7 +158,10 @@ repeated per element:
   bytes 3-4 : y (uint16 LE)
   byte 5    : flags — bit0 checkable, bit1 checked
   byte 6    : text_len (uint8)
-  bytes 7.. : text (ASCII, not null-terminated)
+  bytes 7.. : text (Latin-1, not null-terminated — one byte per rendered glyph column;
+              firmware/src/font_basic.h only covers ASCII plus one extra glyph for the
+              degree sign, 0xB0, everything else outside that falls back to a
+              placeholder box)
 ```
 
 JSON stops at the gateway because firmware has no JSON parser. Capped at 16 elements and

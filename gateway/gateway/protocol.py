@@ -86,7 +86,14 @@ def encode_diff(values: dict[int, str]) -> bytes:
         raise ValueError("diff payload supports at most 255 value updates")
     out = bytes([len(values)])
     for element_id, value in values.items():
-        value_bytes = value.encode("utf-8")
+        # Latin-1, not UTF-8 — same reasoning as encode_full_layout: firmware treats
+        # every byte of `value` as one rendered glyph column (layout_store.c copies it
+        # verbatim, rasterizer.c draws text_len bytes 1:1), so a multi-byte UTF-8
+        # sequence would misrender as extra garbled columns, not just fail to show the
+        # one character. This is the path a live Home Assistant value (e.g. "21.4°C")
+        # actually updates through — encode_full_layout alone wasn't enough to fix the
+        # degree sign for a value that updates via diff rather than a fresh full push.
+        value_bytes = value.encode("latin-1", errors="replace")
         if not (0 <= element_id <= 255):
             raise ValueError(f"element_id {element_id} out of uint8 range")
         if len(value_bytes) > 255:
@@ -112,7 +119,7 @@ def encode_full_layout(layout: dict) -> bytes:
       byte 3-4 : y (uint16 LE)
       byte 5   : flags — bit0 checkable, bit1 checked
       byte 6   : text_len (uint8)
-      byte 7.. : text (ASCII, not null-terminated)
+      byte 7.. : text (Latin-1, not null-terminated — see below)
     Capped at LAYOUT_MAX_ELEMENTS/LAYOUT_MAX_TEXT_LEN to match firmware's fixed-size
     in-RAM layout store — same sizing style as CHUNK_MAX_DIFF_ENTRIES above.
     """
@@ -123,7 +130,14 @@ def encode_full_layout(layout: dict) -> bytes:
         checkable = element.get("type") == "value" and props.get("source") == "button"
         checked = bool(props.get("checked", False)) if checkable else False
         text = props.get("text") if element.get("type") == "text" else props.get("value")
-        text_bytes = (text or "").encode("ascii", errors="replace")[:LAYOUT_MAX_TEXT_LEN]
+        # Latin-1, not ASCII: firmware's rasterizer keeps one byte == one glyph column
+        # (font_basic.h has no multi-byte/UTF-8 handling), and Latin-1's code points
+        # 0-255 map 1:1 onto Unicode's, so this is the widest single-byte encoding that
+        # still fits that assumption. In practice it only buys one extra character over
+        # ASCII — 0xB0, the degree sign, which firmware has a dedicated glyph for
+        # (font_basic.h's font_glyph_degree) — everything else outside ASCII still isn't
+        # in the font and falls back to errors="replace"'s "?" like before.
+        text_bytes = (text or "").encode("latin-1", errors="replace")[:LAYOUT_MAX_TEXT_LEN]
 
         element_id = element["id"]
         if not (0 <= element_id <= 255):
@@ -155,7 +169,7 @@ def decode_full_layout(data: bytes) -> dict:
         y = int.from_bytes(data[offset + 3 : offset + 5], "little")
         flags = data[offset + 5]
         text_len = data[offset + 6]
-        text = data[offset + 7 : offset + 7 + text_len].decode("ascii")
+        text = data[offset + 7 : offset + 7 + text_len].decode("latin-1")
         offset += 7 + text_len
         elements.append(
             {
@@ -177,7 +191,7 @@ def decode_diff(payload: bytes) -> dict[int, str]:
     for _ in range(count):
         element_id = payload[offset]
         length = payload[offset + 1]
-        value = payload[offset + 2 : offset + 2 + length].decode("utf-8")
+        value = payload[offset + 2 : offset + 2 + length].decode("latin-1")
         values[element_id] = value
         offset += 2 + length
     return values

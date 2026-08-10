@@ -26,4 +26,14 @@ void epaper_force_full_refresh(void);
  * a display that matches a dashboard entry. */
 void epaper_identify(void);
 
+/* Commands 0x04/0x05: per-display mounting setting, RAM-only like layout_store's
+ * retained layout (survives DEEP_SLEEP — see main.c's duty cycle — but not a reset).
+ * The gateway resends this every sync regardless of whether it actually changed (spec:
+ * gateway/gateway/sync.py), so it's self-healing after a watchdog reset the same way
+ * layout content is; a no-op here when the value is unchanged avoids a redundant panel
+ * refresh on every one of those resends. Re-renders and pushes the currently retained
+ * layout immediately when the value does change, rather than waiting for the next
+ * content update. */
+void epaper_set_rotation(bool rotate_180);
+
 #endif /* EPAPER_H_ */

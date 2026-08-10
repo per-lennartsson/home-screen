@@ -65,6 +65,13 @@ class Display(Base):
     width: Mapped[int] = mapped_column(default=400)
     height: Mapped[int] = mapped_column(default=300)
 
+    # Per-display mounting setting (e.g. an uneven enclosure bezel needs to sit at the
+    # other edge) — a device-local rendering transform, deliberately independent of
+    # Design/content_hash: it doesn't change what's on screen, only which way up.
+    # Applied firmware-side (rasterizer.c); the gateway asserts it every sync
+    # (gateway/gateway/sync.py) via the `command` characteristic.
+    rotate_180: Mapped[bool] = mapped_column(default=False)
+
     # uint32 CRC32 of the rendered content this display currently holds / should hold
     current_content_hash: Mapped[int | None] = mapped_column(nullable=True)
     desired_content_hash: Mapped[int | None] = mapped_column(nullable=True)

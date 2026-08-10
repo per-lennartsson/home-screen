@@ -82,6 +82,17 @@ export default function DesignsPage() {
     setSelectedIndex(null);
   };
 
+  const removeDesign = async (design) => {
+    if (!window.confirm(`Delete design "${design.name}"? This can't be undone.`)) return;
+    setError(null);
+    try {
+      await api.deleteDesign(design.id);
+      refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
   const save = async () => {
     setError(null);
     try {
@@ -172,30 +183,42 @@ export default function DesignsPage() {
         <div className="page-body">
           {error && <div className="error">{error}</div>}
           <div className="card-grid narrow">
-            {designs.map((d) => (
-              <div key={d.id} className="entity-card">
-                <div className="entity-card-head">
-                  <div>
-                    <div className="entity-card-title">{d.name}</div>
-                    <div className="entity-card-sub">
-                      {d.width}×{d.height} · {(d.layout_json.elements || []).length} element
-                      {(d.layout_json.elements || []).length === 1 ? "" : "s"}
+            {designs.map((d) => {
+              const usedBy = displays.filter((disp) => disp.design_id === d.id).length;
+              return (
+                <div key={d.id} className="entity-card">
+                  <div className="entity-card-head">
+                    <div>
+                      <div className="entity-card-title">{d.name}</div>
+                      <div className="entity-card-sub">
+                        {d.width}×{d.height} · {(d.layout_json.elements || []).length} element
+                        {(d.layout_json.elements || []).length === 1 ? "" : "s"}
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="card-stats" style={{ marginTop: 0 }}>
-                  <div>
-                    <div className="card-stat-label">Updated</div>
-                    <div className="card-stat-value">{relativeTime(d.updated_at)}</div>
+                  <div className="card-stats" style={{ marginTop: 0 }}>
+                    <div>
+                      <div className="card-stat-label">Updated</div>
+                      <div className="card-stat-value">{relativeTime(d.updated_at)}</div>
+                    </div>
+                  </div>
+                  <div className="entity-card-footer">
+                    <button type="button" className="btn secondary small" onClick={() => openEdit(d)}>
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="btn danger small"
+                      disabled={usedBy > 0}
+                      title={usedBy > 0 ? "Unassign it from displays first" : undefined}
+                      onClick={() => removeDesign(d)}
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
-                <div className="entity-card-footer">
-                  <button type="button" className="btn secondary small" onClick={() => openEdit(d)}>
-                    Edit
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           {designs.length === 0 && <div className="muted">No designs yet.</div>}
         </div>

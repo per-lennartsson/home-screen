@@ -124,6 +124,27 @@ export default function DisplaysPage() {
     }
   };
 
+  const toggleRotation = async (display) => {
+    setError(null);
+    try {
+      await api.setRotation(display.id, !display.rotate_180);
+      refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  const remove = async (display) => {
+    if (!window.confirm(`Delete display "${display.name}"? This can't be undone.`)) return;
+    setError(null);
+    try {
+      await api.deleteDisplay(display.id);
+      refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
   const toggleDetails = async (displayId) => {
     if (detailsFor === displayId) {
       setDetailsFor(null);
@@ -327,8 +348,19 @@ export default function DisplaysPage() {
                       Assign gateway
                     </button>
                   )}
+                  <button
+                    type="button"
+                    className="btn secondary small"
+                    title="Flip the rendered image 180° to match how this panel is physically mounted"
+                    onClick={() => toggleRotation(d)}
+                  >
+                    {d.rotate_180 ? "Undo 180° rotation" : "Rotate 180°"}
+                  </button>
                   <button type="button" className="btn ghost" onClick={() => toggleDetails(d.id)}>
                     Details
+                  </button>
+                  <button type="button" className="btn danger small" onClick={() => remove(d)}>
+                    Delete
                   </button>
                 </div>
               </div>

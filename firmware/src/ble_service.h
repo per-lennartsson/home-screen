@@ -22,6 +22,11 @@ typedef void (*ble_service_event_cb_t)(enum ble_service_event event);
 #define BLE_SERVICE_COMMAND_FORCE_FULL_REFRESH 0x01
 #define BLE_SERVICE_COMMAND_SLEEP_NOW 0x02
 #define BLE_SERVICE_COMMAND_IDENTIFY 0x03
+/* Per-display mounting orientation (epaper_set_rotation) — mirrors
+ * gateway/gateway/uuids.py's COMMAND_ROTATE_NORMAL/COMMAND_ROTATE_180. Sent by the
+ * gateway on every sync (see sync.py), not just when it changes. */
+#define BLE_SERVICE_COMMAND_ROTATE_NORMAL 0x04
+#define BLE_SERVICE_COMMAND_ROTATE_180 0x05
 
 int ble_service_init(void);
 

@@ -12,7 +12,7 @@ import logging
 import time
 from dataclasses import dataclass
 
-from gateway import protocol
+from gateway import protocol, uuids
 from gateway.backend_client import BackendClient
 from gateway.ble_transport import BleConnection, BleTransport
 
@@ -25,6 +25,7 @@ class DeviceState:
     display_id: int
     pending: bool = True  # unknown -> assume it might need something until proven otherwise
     last_checkin_monotonic: float | None = None
+    rotate_180: bool = False
 
 
 class GatewayService:
@@ -54,6 +55,7 @@ class GatewayService:
                 state = DeviceState(mac_address=d["mac_address"], display_id=d["id"])
                 self.devices[d["mac_address"]] = state
             state.display_id = d["id"]
+            state.rotate_180 = d["rotate_180"]
             if not d["in_sync"]:
                 state.pending = True
 
@@ -78,6 +80,15 @@ class GatewayService:
     async def _sync_device(self, state: DeviceState) -> None:
         try:
             async with self.transport.connect(state.mac_address) as conn:
+                # Asserted every sync, not just when it changes — cheap (one byte) and
+                # self-healing after a firmware reset, same reasoning as re-pushing
+                # content on a stale hash rather than trying to track "did this
+                # already land" across power cycles (epaper.c's epaper_set_rotation
+                # no-ops on-device if it's already the current value).
+                await conn.write_command(
+                    uuids.COMMAND_ROTATE_180 if state.rotate_180 else uuids.COMMAND_ROTATE_NORMAL
+                )
+
                 status = await conn.read_status()
                 state.last_checkin_monotonic = time.monotonic()
 

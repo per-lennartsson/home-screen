@@ -36,6 +36,17 @@ export default function GatewaysPage() {
     }
   };
 
+  const remove = async (gateway) => {
+    if (!window.confirm(`Delete gateway "${gateway.name}"? This can't be undone.`)) return;
+    setError(null);
+    try {
+      await api.deleteGateway(gateway.id);
+      refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
   return (
     <>
       <header className="page-header">
@@ -82,7 +93,9 @@ export default function GatewaysPage() {
                 <div className="entity-card-head">
                   <div>
                     <div className="entity-card-title">{g.name}</div>
-                    <div className="entity-card-sub">{g.location || "No location set"}</div>
+                    <div className="entity-card-sub">
+                      {g.location || "No location set"} · ID {g.id}
+                    </div>
                   </div>
                   <span className={`status-badge ${online ? "ok" : "warn"}`}>
                     <span className="status-dot" />
@@ -109,6 +122,17 @@ export default function GatewaysPage() {
                     agent is running and can reach this server.
                   </div>
                 )}
+                <div className="entity-card-footer">
+                  <button
+                    type="button"
+                    className="btn danger small"
+                    disabled={served.length > 0}
+                    title={served.length > 0 ? "Unassign its displays first" : undefined}
+                    onClick={() => remove(g)}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             );
           })}

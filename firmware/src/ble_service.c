@@ -136,6 +136,8 @@ K_THREAD_STACK_DEFINE(epaper_work_q_stack, EPAPER_WORKQ_STACK_SIZE);
 
 static struct k_work identify_work;
 static struct k_work full_refresh_work;
+static struct k_work rotate_normal_work;
+static struct k_work rotate_180_work;
 
 static void identify_work_handler(struct k_work *work)
 {
@@ -147,6 +149,18 @@ static void full_refresh_work_handler(struct k_work *work)
 {
 	ARG_UNUSED(work);
 	epaper_force_full_refresh();
+}
+
+static void rotate_normal_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	epaper_set_rotation(false);
+}
+
+static void rotate_180_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	epaper_set_rotation(true);
 }
 
 /* Unlike identify/full_refresh above, applying a data_transfer message needs the payload
@@ -274,6 +288,12 @@ static ssize_t write_command(struct bt_conn *conn, const struct bt_gatt_attr *at
 	case BLE_SERVICE_COMMAND_IDENTIFY:
 		k_work_submit_to_queue(&epaper_work_q, &identify_work);
 		break;
+	case BLE_SERVICE_COMMAND_ROTATE_NORMAL:
+		k_work_submit_to_queue(&epaper_work_q, &rotate_normal_work);
+		break;
+	case BLE_SERVICE_COMMAND_ROTATE_180:
+		k_work_submit_to_queue(&epaper_work_q, &rotate_180_work);
+		break;
 	default:
 		LOG_WRN("command: unknown command 0x%02x", command);
 		break;
@@ -342,6 +362,8 @@ int ble_service_init(void)
 
 	k_work_init(&identify_work, identify_work_handler);
 	k_work_init(&full_refresh_work, full_refresh_work_handler);
+	k_work_init(&rotate_normal_work, rotate_normal_work_handler);
+	k_work_init(&rotate_180_work, rotate_180_work_handler);
 	k_work_init(&epaper_apply_staging.work, epaper_apply_work_handler);
 	return bt_enable(NULL);
 }
