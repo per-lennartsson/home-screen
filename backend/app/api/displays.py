@@ -14,6 +14,7 @@ from app.schemas.display import (
     DisplayOut,
     DisplayRotationSet,
     DisplayStatusReport,
+    DisplayWakeIntervalSet,
     PayloadDiff,
     PayloadFull,
     PayloadInSync,
@@ -115,6 +116,22 @@ async def set_rotation(display_id: int, payload: DisplayRotationSet, db: Session
         raise HTTPException(status_code=404, detail="display not found")
 
     display.rotate_180 = payload.rotate_180
+    db.commit()
+    db.refresh(display)
+    return display
+
+
+@router.post("/{display_id}/wake-interval", response_model=DisplayOut)
+async def set_wake_interval(display_id: int, payload: DisplayWakeIntervalSet, db: Session = Depends(get_db)):
+    """Sets how often the display wakes to check in and poll for new content
+    (firmware's APP_WAKE_INTERVAL_S, see main.c). Like rotate_180, this is asserted on
+    every gateway sync (gateway/gateway/sync.py) rather than pushed once, so it's
+    self-healing after a firmware reset."""
+    display = db.get(Display, display_id)
+    if display is None:
+        raise HTTPException(status_code=404, detail="display not found")
+
+    display.wake_interval_s = payload.wake_interval_s
     db.commit()
     db.refresh(display)
     return display

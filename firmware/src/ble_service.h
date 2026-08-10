@@ -28,6 +28,22 @@ typedef void (*ble_service_event_cb_t)(enum ble_service_event event);
 #define BLE_SERVICE_COMMAND_ROTATE_NORMAL 0x04
 #define BLE_SERVICE_COMMAND_ROTATE_180 0x05
 
+/* Unlike the plain single-byte commands above, this one's write carries a 2-byte
+ * little-endian value (seconds) after the command byte, so write_command's usual
+ * `len != 1` rejection doesn't apply to it — see write_command's switch in
+ * ble_service.c. Mirrors gateway/gateway/uuids.py's COMMAND_SET_WAKE_INTERVAL_S; sent
+ * by the gateway on every sync, same self-healing reasoning as ROTATE_* above. */
+#define BLE_SERVICE_COMMAND_SET_WAKE_INTERVAL_S 0x06
+
+/* main.c's DEEP_SLEEP duration (ble_service_get_wake_interval_s()) is clamped to this
+ * range on write rather than rejected — an out-of-range request still leaves the
+ * display in a working state instead of erroring the whole command write. MAX also
+ * bounds WATCHDOG_TIMEOUT_MS (main.c), so raising it means accepting a looser watchdog
+ * window for every cycle, not just long-interval ones. */
+#define BLE_SERVICE_MIN_WAKE_INTERVAL_S 5
+#define BLE_SERVICE_MAX_WAKE_INTERVAL_S 3600
+#define BLE_SERVICE_DEFAULT_WAKE_INTERVAL_S 15
+
 int ble_service_init(void);
 
 /* Called once from main; fires on every connect/disconnect so main.c's state machine
@@ -41,6 +57,13 @@ int ble_service_stop_advertising(void);
  * once a data_transfer message has been applied, and by battery.c after each reading. */
 void ble_service_set_content_hash(uint32_t content_hash);
 void ble_service_set_battery(uint8_t battery_pct, uint16_t battery_mv);
+
+/* Read by main.c's DEEP_SLEEP loop on every cycle. Starts at
+ * BLE_SERVICE_DEFAULT_WAKE_INTERVAL_S and is updated in place by an incoming
+ * BLE_SERVICE_COMMAND_SET_WAKE_INTERVAL_S write (write_command in ble_service.c) — not
+ * persisted across a power cycle, same as rotate_180's RAM-only state, since the
+ * gateway re-asserts both every sync. */
+uint16_t ble_service_get_wake_interval_s(void);
 
 /* button_event characteristic: 1 byte, bit i (0-4) = checklist row i's button pressed
  * since the mask was last read. Read-only, atomically cleared on read. No setter here —

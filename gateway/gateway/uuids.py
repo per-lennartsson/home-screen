@@ -33,3 +33,8 @@ COMMAND_SLEEP_NOW = 0x02
 COMMAND_IDENTIFY = 0x03
 COMMAND_ROTATE_NORMAL = 0x04
 COMMAND_ROTATE_180 = 0x05
+# Unlike the plain single-byte commands above, this one carries a 2-byte little-endian
+# value (seconds) appended after the command byte — see write_command's `value` param
+# in ble_transport.py and BLE_SERVICE_COMMAND_SET_WAKE_INTERVAL_S in ble_service.h.
+# Sent on every sync, same self-healing reasoning as ROTATE_*.
+COMMAND_SET_WAKE_INTERVAL_S = 0x06

@@ -33,6 +33,10 @@ def ensure_schema_additions() -> None:
             conn.exec_driver_sql(
                 "ALTER TABLE displays ADD COLUMN rotate_180 BOOLEAN NOT NULL DEFAULT 0"
             )
+        if display_cols and "wake_interval_s" not in display_cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE displays ADD COLUMN wake_interval_s INTEGER NOT NULL DEFAULT 15"
+            )
 
 
 async def get_db():

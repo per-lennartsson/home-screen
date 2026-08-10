@@ -72,6 +72,14 @@ class Display(Base):
     # (gateway/gateway/sync.py) via the `command` characteristic.
     rotate_180: Mapped[bool] = mapped_column(default=False)
 
+    # How long the display sleeps between DEEP_SLEEP wake cycles (main.c's
+    # APP_WAKE_INTERVAL_S, now runtime-configurable). Same "assert every sync" model as
+    # rotate_180 above — self-healing after a firmware reset, which starts back at
+    # ble_service.h's BLE_SERVICE_DEFAULT_WAKE_INTERVAL_S until the gateway re-pushes
+    # this value. Bounds (5-3600s) mirror HomeAssistantConfig.poll_interval_s and
+    # firmware's BLE_SERVICE_MIN/MAX_WAKE_INTERVAL_S.
+    wake_interval_s: Mapped[int] = mapped_column(default=15)
+
     # uint32 CRC32 of the rendered content this display currently holds / should hold
     current_content_hash: Mapped[int | None] = mapped_column(nullable=True)
     desired_content_hash: Mapped[int | None] = mapped_column(nullable=True)

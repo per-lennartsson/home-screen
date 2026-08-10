@@ -36,6 +36,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ rotate_180: rotate180 }),
     }),
+  setWakeInterval: (displayId, wakeIntervalS) =>
+    request(`/displays/${displayId}/wake-interval`, {
+      method: "POST",
+      body: JSON.stringify({ wake_interval_s: wakeIntervalS }),
+    }),
   getPayload: (displayId) => request(`/displays/${displayId}/payload`),
 
   listDesigns: () => request("/designs"),

@@ -47,12 +47,17 @@ than a phone BLE app — `gateway/README.md` walks through that.
 
 ## What you'll need to fill in / verify
 
-1. **Raise `APP_WAKE_INTERVAL_S` back up** (plain `#define` at the top of `main.c`, not
-   yet a Kconfig option) once the gateway path is proven. It's currently 15 s, chosen so
-   bring-up iterations take about half a minute instead of four — content needs two wake
-   cycles to converge (docs/protocol.md) — but that leaves the radio advertising roughly
-   a fifth of the time, which is not a battery-life setting. Spec 8 leaves the real value
-   open pending measurements.
+1. **Raise the default wake interval** (`BLE_SERVICE_DEFAULT_WAKE_INTERVAL_S` in
+   `ble_service.h`) once the gateway path is proven. The interval itself is no longer a
+   fixed `#define` main.c sleeps on — it's runtime-configurable per display from the
+   frontend (backend `wake_interval_s` → gateway `COMMAND_SET_WAKE_INTERVAL_S`, asserted
+   every sync same as `rotate_180`), clamped to
+   `[BLE_SERVICE_MIN_WAKE_INTERVAL_S, BLE_SERVICE_MAX_WAKE_INTERVAL_S]`. The *default* a
+   freshly reset display starts at is still 15 s, chosen so bring-up iterations take about
+   half a minute instead of four — content needs two wake cycles to converge
+   (docs/protocol.md) — but that leaves the radio advertising roughly a fifth of the time,
+   which is not a battery-life setting. Spec 8 leaves the real value open pending
+   measurements.
 2. **Verify the VBAT divider ratio** (`VBAT_DIVIDER_RATIO` in `battery.c`, currently 3)
    against a real battery and multimeter — the ~1/3 figure is what's documented for this
    board, not something measured on this specific unit.

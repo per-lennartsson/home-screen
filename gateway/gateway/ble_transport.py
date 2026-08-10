@@ -30,8 +30,10 @@ class BleConnection(ABC):
         """Write one chunk to the `data_transfer` characteristic."""
 
     @abstractmethod
-    async def write_command(self, command: int) -> None:
-        """Write one byte to the `command` characteristic (uuids.COMMAND_*)."""
+    async def write_command(self, command: int, value: bytes = b"") -> None:
+        """Write to the `command` characteristic (uuids.COMMAND_*): the command byte,
+        plus `value` appended raw for commands that carry one (currently just
+        COMMAND_SET_WAKE_INTERVAL_S's 2-byte little-endian seconds)."""
 
     @abstractmethod
     async def read_button_event(self) -> int:
@@ -74,6 +76,7 @@ class MockDisplay:
         # below, so tests can assert the sync loop actually asserts the backend's
         # rotate_180 setting on every connection (sync.py).
         self.rotate_180 = False
+        self.wake_interval_s: int | None = None
         self.last_command: int | None = None
 
         # Test hooks for proving retry/backoff behavior (spec 5.1 step 8).
@@ -88,12 +91,14 @@ class MockDisplay:
     def press_button(self, button_index: int) -> None:
         self.pending_button_mask |= 1 << button_index
 
-    def apply_command(self, command: int) -> None:
+    def apply_command(self, command: int, value: bytes = b"") -> None:
         self.last_command = command
         if command == uuids.COMMAND_ROTATE_180:
             self.rotate_180 = True
         elif command == uuids.COMMAND_ROTATE_NORMAL:
             self.rotate_180 = False
+        elif command == uuids.COMMAND_SET_WAKE_INTERVAL_S:
+            self.wake_interval_s = int.from_bytes(value, "little")
 
     def status(self) -> dict:
         return {
@@ -149,8 +154,8 @@ class _MockConnection(BleConnection):
     async def write_data_transfer(self, chunk: bytes) -> None:
         self._display.apply_chunk(chunk)
 
-    async def write_command(self, command: int) -> None:
-        self._display.apply_command(command)
+    async def write_command(self, command: int, value: bytes = b"") -> None:
+        self._display.apply_command(command, value)
 
     async def read_button_event(self) -> int:
         mask = self._display.pending_button_mask

@@ -76,6 +76,13 @@ static chunk_reassembler_t reassembler;
 static struct bt_conn *active_conn;
 static ble_service_event_cb_t event_cb;
 
+static uint16_t current_wake_interval_s = BLE_SERVICE_DEFAULT_WAKE_INTERVAL_S;
+
+uint16_t ble_service_get_wake_interval_s(void)
+{
+	return current_wake_interval_s;
+}
+
 static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
 			    uint16_t len, uint16_t offset)
 {
@@ -270,11 +277,15 @@ static ssize_t write_command(struct bt_conn *conn, const struct bt_gatt_attr *at
 	if (offset != 0) {
 		return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
 	}
-	if (len != 1) {
+	/* Every command below except SET_WAKE_INTERVAL_S is a bare 1-byte write; that one
+	 * carries a 2-byte value after the command byte, so the length check happens per
+	 * command in the switch instead of a single upfront `len != 1`. */
+	if (len < 1) {
 		return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
 	}
 
-	uint8_t command = ((const uint8_t *)buf)[0];
+	const uint8_t *data = buf;
+	uint8_t command = data[0];
 
 	switch (command) {
 	case BLE_SERVICE_COMMAND_FORCE_FULL_REFRESH:
@@ -294,6 +305,22 @@ static ssize_t write_command(struct bt_conn *conn, const struct bt_gatt_attr *at
 	case BLE_SERVICE_COMMAND_ROTATE_180:
 		k_work_submit_to_queue(&epaper_work_q, &rotate_180_work);
 		break;
+	case BLE_SERVICE_COMMAND_SET_WAKE_INTERVAL_S: {
+		if (len != 1 + sizeof(uint16_t)) {
+			LOG_WRN("command: SET_WAKE_INTERVAL_S needs a 2-byte value, got len=%u",
+				len);
+			break;
+		}
+		uint16_t requested_s = sys_get_le16(&data[1]);
+
+		if (requested_s < BLE_SERVICE_MIN_WAKE_INTERVAL_S) {
+			requested_s = BLE_SERVICE_MIN_WAKE_INTERVAL_S;
+		} else if (requested_s > BLE_SERVICE_MAX_WAKE_INTERVAL_S) {
+			requested_s = BLE_SERVICE_MAX_WAKE_INTERVAL_S;
+		}
+		current_wake_interval_s = requested_s;
+		break;
+	}
 	default:
 		LOG_WRN("command: unknown command 0x%02x", command);
 		break;

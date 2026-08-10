@@ -41,6 +41,8 @@ export default function DisplaysPage() {
 
   const [changingDesignFor, setChangingDesignFor] = useState(null);
   const [assigningGatewayFor, setAssigningGatewayFor] = useState(null);
+  const [editingWakeIntervalFor, setEditingWakeIntervalFor] = useState(null);
+  const [wakeIntervalDraft, setWakeIntervalDraft] = useState(15);
   const [detailsFor, setDetailsFor] = useState(null);
   const [payload, setPayload] = useState(null);
 
@@ -128,6 +130,22 @@ export default function DisplaysPage() {
     setError(null);
     try {
       await api.setRotation(display.id, !display.rotate_180);
+      refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  const startEditingWakeInterval = (display) => {
+    setWakeIntervalDraft(display.wake_interval_s);
+    setEditingWakeIntervalFor((v) => (v === display.id ? null : display.id));
+  };
+
+  const saveWakeInterval = async (displayId) => {
+    setError(null);
+    try {
+      await api.setWakeInterval(displayId, +wakeIntervalDraft);
+      setEditingWakeIntervalFor(null);
       refresh();
     } catch (e) {
       setError(e.message);
@@ -334,8 +352,39 @@ export default function DisplaysPage() {
                   </div>
                   <div className="muted">
                     {d.last_seen_at ? `Refreshed ${relativeTime(d.last_seen_at)}` : "Waiting for first check-in"}
+                    {" · "}
+                    wakes every {d.wake_interval_s}s
                   </div>
                 </div>
+
+                {editingWakeIntervalFor === d.id && (
+                  <div className="entity-card-body">
+                    <div className="field">
+                      <label>Wake interval</label>
+                      <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                        <input
+                          type="number"
+                          min={5}
+                          max={3600}
+                          value={wakeIntervalDraft}
+                          onChange={(e) => setWakeIntervalDraft(e.target.value)}
+                          style={{ width: 90 }}
+                          autoFocus
+                        />
+                        <span className="muted" style={{ fontSize: "12.5px" }}>
+                          seconds
+                        </span>
+                        <button type="button" className="btn small" onClick={() => saveWakeInterval(d.id)}>
+                          Save
+                        </button>
+                      </div>
+                      <div className="muted" style={{ marginTop: 4 }}>
+                        How often this panel wakes from deep sleep to check in and poll for new content. Lower
+                        values mean fresher data at the cost of battery life.
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="entity-card-footer">
                   {design && (
@@ -355,6 +404,14 @@ export default function DisplaysPage() {
                     onClick={() => toggleRotation(d)}
                   >
                     {d.rotate_180 ? "Undo 180° rotation" : "Rotate 180°"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary small"
+                    title="Configure how often this panel wakes up to check in and poll for new content"
+                    onClick={() => startEditingWakeInterval(d)}
+                  >
+                    Wake interval
                   </button>
                   <button type="button" className="btn ghost" onClick={() => toggleDetails(d.id)}>
                     Details

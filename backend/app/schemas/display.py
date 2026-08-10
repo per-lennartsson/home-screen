@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DisplayCreate(BaseModel):
@@ -22,6 +22,13 @@ class DisplayGatewayAssign(BaseModel):
 
 class DisplayRotationSet(BaseModel):
     rotate_180: bool
+
+
+class DisplayWakeIntervalSet(BaseModel):
+    # Bounds mirror firmware's BLE_SERVICE_MIN/MAX_WAKE_INTERVAL_S (ble_service.h) — a
+    # value outside this range can't actually be applied on-device, so reject it here
+    # rather than silently clamping.
+    wake_interval_s: int = Field(ge=5, le=3600)
 
 
 class DisplayStatusReport(BaseModel):
@@ -47,6 +54,7 @@ class DisplayOut(BaseModel):
     width: int
     height: int
     rotate_180: bool
+    wake_interval_s: int
     current_content_hash: int | None
     desired_content_hash: int | None
     battery_pct: int | None

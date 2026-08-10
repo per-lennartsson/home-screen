@@ -27,23 +27,29 @@ LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
 #define FW_VERSION 1
 
-/* Not yet Kconfig options — see firmware/README.md item 1. Tune once real battery-life
- * data exists (spec 8 leaves the exact interval open on purpose).
- *
- * 15s is a bring-up value, not a battery-life one: content takes two wake cycles to
- * converge (docs/protocol.md, "Sync latency"), so at the earlier 120s every test
- * iteration cost about four minutes. Raise it once the gateway path is proven. */
-#define APP_WAKE_INTERVAL_S 15
+/* Not yet a Kconfig option — see firmware/README.md item 1. */
 #define APP_ADVERTISING_WINDOW_MS 4000
 
-/* Generous enough to cover one full advertising+sync cycle plus slack, short enough to
+/* DEEP_SLEEP's duration itself is no longer a compile-time constant here — it's
+ * ble_service_get_wake_interval_s(), runtime-configurable via
+ * BLE_SERVICE_COMMAND_SET_WAKE_INTERVAL_S (ble_service.h) so the backend/gateway can
+ * tune it per display without reflashing. It starts at
+ * BLE_SERVICE_DEFAULT_WAKE_INTERVAL_S — a bring-up value, not a battery-life one:
+ * content takes two wake cycles to converge (docs/protocol.md, "Sync latency"), so at a
+ * much longer interval every test iteration would cost several minutes.
+ *
+ * Generous enough to cover one full advertising+sync cycle plus slack, short enough to
  * catch a genuinely stuck SYNCING phase (spec 4.1's watchdog requirement). Fed exactly
  * once per completed cycle, right before going back to sleep — not continuously — so a
  * hang anywhere in a cycle (not just SYNCING) eventually forces the reset spec 4.1 asks
- * for. The nRF's watchdog can't be paused once started, so "feed once per full cycle"
- * is the only way to get a timeout that tolerates the intentional long sleep but still
- * catches a stuck cycle. */
-#define WATCHDOG_TIMEOUT_MS (2 * APP_WAKE_INTERVAL_S * 1000)
+ * for. The nRF's watchdog timeout can't be changed once wdt_setup() runs (its CRV
+ * register is write-once-per-reset), so this is sized off
+ * BLE_SERVICE_MAX_WAKE_INTERVAL_S — the worst case the wake interval could ever be set
+ * to — rather than whatever it's currently configured to. That means a short-interval
+ * display's watchdog window is looser than the "2x this cycle" reasoning alone would
+ * give it, but a wake interval that long is itself an intentional long sleep, not a
+ * hang, so a loose bound there costs nothing but watchdog precision. */
+#define WATCHDOG_TIMEOUT_MS (2 * BLE_SERVICE_MAX_WAKE_INTERVAL_S * 1000)
 
 static K_SEM_DEFINE(sync_done_sem, 0, 1);
 
@@ -180,7 +186,7 @@ int main(void)
 		 * to wake us here, with no extra devicetree "wakeup-source" plumbing. */
 		watchdog_feed();
 		k_sem_reset(&wake_sem);
-		k_sem_take(&wake_sem, K_MSEC(APP_WAKE_INTERVAL_S * 1000));
+		k_sem_take(&wake_sem, K_MSEC(ble_service_get_wake_interval_s() * 1000));
 	}
 
 	return 0;

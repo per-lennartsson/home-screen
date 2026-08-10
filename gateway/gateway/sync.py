@@ -26,6 +26,7 @@ class DeviceState:
     pending: bool = True  # unknown -> assume it might need something until proven otherwise
     last_checkin_monotonic: float | None = None
     rotate_180: bool = False
+    wake_interval_s: int = 15
 
 
 class GatewayService:
@@ -56,6 +57,7 @@ class GatewayService:
                 self.devices[d["mac_address"]] = state
             state.display_id = d["id"]
             state.rotate_180 = d["rotate_180"]
+            state.wake_interval_s = d["wake_interval_s"]
             if not d["in_sync"]:
                 state.pending = True
 
@@ -87,6 +89,9 @@ class GatewayService:
                 # no-ops on-device if it's already the current value).
                 await conn.write_command(
                     uuids.COMMAND_ROTATE_180 if state.rotate_180 else uuids.COMMAND_ROTATE_NORMAL
+                )
+                await conn.write_command(
+                    uuids.COMMAND_SET_WAKE_INTERVAL_S, state.wake_interval_s.to_bytes(2, "little")
                 )
 
                 status = await conn.read_status()

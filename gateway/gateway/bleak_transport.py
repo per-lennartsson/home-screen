@@ -103,11 +103,13 @@ class BleakConnection(BleConnection):
         # must be acknowledged before the next is queued.
         await self._client.write_gatt_char(uuids.DATA_TRANSFER_CHAR_UUID, chunk, response=True)
 
-    async def write_command(self, command: int) -> None:
-        """Used by sync.py to assert a display's rotate_180 setting every sync, and by
-        the diagnostics in __main__.py (e.g. triggering IDENTIFY on a specific
-        display)."""
-        await self._client.write_gatt_char(uuids.COMMAND_CHAR_UUID, bytes([command]), response=True)
+    async def write_command(self, command: int, value: bytes = b"") -> None:
+        """Used by sync.py to assert a display's rotate_180/wake_interval_s settings
+        every sync, and by the diagnostics in __main__.py (e.g. triggering IDENTIFY on a
+        specific display)."""
+        await self._client.write_gatt_char(
+            uuids.COMMAND_CHAR_UUID, bytes([command]) + value, response=True
+        )
 
     @property
     def mtu_payload_size(self) -> int:
