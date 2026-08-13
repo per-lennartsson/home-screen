@@ -158,6 +158,24 @@ class BatteryReading(Base):
     wake_interval_s: Mapped[int] = mapped_column()
     recorded_at: Mapped[datetime] = mapped_column(default=_utcnow, index=True)
 
+    # Whether this wake's connection went on to push a content payload (diff or full —
+    # see api/displays.py's report_status, computed from Display.in_sync right after
+    # current_content_hash is updated) rather than just read status and disconnect. The
+    # push (BLE transfer + e-paper refresh) happens *after* this reading's battery_mv was
+    # sampled, so its extra cost shows up in the *next* reading, not this one — battery.py
+    # uses this flag to tell "bare check-in" drain apart from "check-in + push" drain
+    # instead of averaging them into one undifferentiated per-wake cost.
+    pushed_payload: Mapped[bool] = mapped_column(default=False)
+
+    # Real signal from the charger IC's status pin (firmware/src/battery.c, appended to
+    # the BLE status struct as of fw_version 2 — see docs/protocol.md), not inferred.
+    # NULL means "unknown" (either this reading predates the schema column, or the
+    # display was still running pre-charge-status firmware at the time) — deliberately
+    # distinct from False ("device confirmed not charging"), since battery.py's
+    # charging_flags() only trusts this when it isn't NULL and falls back to its own
+    # voltage-trend heuristic otherwise.
+    reported_charging: Mapped[bool | None] = mapped_column(nullable=True, default=None)
+
     display: Mapped["Display"] = relationship(back_populates="battery_readings")
 
 

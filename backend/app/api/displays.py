@@ -22,7 +22,7 @@ from app.schemas.display import (
     PayloadFull,
     PayloadInSync,
 )
-from app.services.battery import estimate_remaining
+from app.services.battery import charging_flags, estimate_remaining
 from app.services.rendering import build_value_diff, find_button_element, recompute_desired_hashes
 
 router = APIRouter(prefix="/api/displays", tags=["displays"])
@@ -208,6 +208,11 @@ async def report_status(display_id: int, payload: DisplayStatusReport, db: Sessi
             battery_pct=payload.battery_pct,
             battery_mv=payload.battery_mv,
             wake_interval_s=display.wake_interval_s,
+            # Mirrors the same in_sync check get_payload will make right after this same
+            # connection reads this status — if it doesn't match, this wake is about to
+            # push a payload before disconnecting, not just check in and go back to sleep.
+            pushed_payload=not display.in_sync,
+            reported_charging=payload.charging,
         )
     )
     db.commit()
@@ -218,16 +223,23 @@ async def report_status(display_id: int, payload: DisplayStatusReport, db: Sessi
 @router.get("/{display_id}/battery-history", response_model=list[BatteryReadingOut])
 async def get_battery_history(display_id: int, db: Session = Depends(get_db)):
     """Full logged battery history (BatteryReading, one row per /status report) for
-    charting, oldest first."""
+    charting, oldest first. is_charging is annotated here (not stored) purely for the
+    chart — battery-estimate is what actually excludes charging readings from the
+    drain-rate math."""
     display = db.get(Display, display_id)
     if display is None:
         raise HTTPException(status_code=404, detail="display not found")
 
-    return db.scalars(
+    readings = db.scalars(
         select(BatteryReading)
         .where(BatteryReading.display_id == display_id)
         .order_by(BatteryReading.recorded_at)
     ).all()
+    flags = charging_flags(readings)
+    return [
+        BatteryReadingOut.model_validate(r).model_copy(update={"is_charging": charging})
+        for r, charging in zip(readings, flags)
+    ]
 
 
 @router.get("/{display_id}/battery-estimate", response_model=BatteryEstimateOut)

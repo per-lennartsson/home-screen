@@ -26,7 +26,7 @@
 
 LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
-#define FW_VERSION 1
+#define FW_VERSION 2
 
 /* Not yet a Kconfig option — see firmware/README.md item 1. */
 #define APP_ADVERTISING_WINDOW_MS 4000
@@ -200,8 +200,9 @@ int main(void)
 	while (1) {
 		uint8_t battery_pct;
 		uint16_t battery_mv;
-		if (battery_read(&battery_pct, &battery_mv) == 0) {
-			ble_service_set_battery(battery_pct, battery_mv);
+		bool charging;
+		if (battery_read(&battery_pct, &battery_mv, &charging) == 0) {
+			ble_service_set_battery(battery_pct, battery_mv, charging);
 		} else {
 			LOG_WRN("battery read failed, status will report last known value");
 		}

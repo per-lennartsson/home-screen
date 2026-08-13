@@ -17,11 +17,21 @@ class BackendClient:
         resp.raise_for_status()
         return resp.json()
 
-    async def report_status(self, display_id: int, content_hash: int, battery_pct: int, battery_mv: int) -> dict:
-        resp = await self._client.post(
-            f"/api/displays/{display_id}/status",
-            json={"content_hash": content_hash, "battery_pct": battery_pct, "battery_mv": battery_mv},
-        )
+    async def report_status(
+        self,
+        display_id: int,
+        content_hash: int,
+        battery_pct: int,
+        battery_mv: int,
+        charging: bool | None = None,
+    ) -> dict:
+        # charging omitted (not sent as an explicit null) rather than always included —
+        # matches DisplayStatusReport.charging's default of None on the backend, and
+        # keeps this payload identical to before for a display too old to report it.
+        payload = {"content_hash": content_hash, "battery_pct": battery_pct, "battery_mv": battery_mv}
+        if charging is not None:
+            payload["charging"] = charging
+        resp = await self._client.post(f"/api/displays/{display_id}/status", json=payload)
         resp.raise_for_status()
         return resp.json()
 

@@ -44,7 +44,10 @@ from gateway.ble_transport import BleConnection, BleTransport
 logger = logging.getLogger("gateway.ble")
 
 # `struct status_value` in firmware/src/ble_service.c: __packed, all little-endian.
-# uint32 content_hash, uint8 battery_pct, uint16 battery_mv, uint16 fw_version.
+# uint32 content_hash, uint8 battery_pct, uint16 battery_mv, uint16 fw_version. This is
+# the *guaranteed* prefix — charging (below) was appended later and is read separately,
+# defensively, so a display still running pre-charge-status firmware (shorter status
+# read) doesn't fail here.
 STATUS_STRUCT = struct.Struct("<IBHH")
 
 # An ATT Write Request spends 3 bytes on opcode + handle, so the largest writable value
@@ -84,11 +87,17 @@ class BleakConnection(BleConnection):
         content_hash, battery_pct, battery_mv, fw_version = STATUS_STRUCT.unpack(
             raw[: STATUS_STRUCT.size]
         )
+        # charging (struct status_value's 10th byte, fw_version 2+): None rather than
+        # False on an older, not-yet-reflashed display — the backend falls back to its
+        # own voltage-trend inference only when it actually doesn't know, and "doesn't
+        # know" and "confirmed not charging" shouldn't look the same.
+        charging = bool(raw[STATUS_STRUCT.size]) if len(raw) > STATUS_STRUCT.size else None
         return {
             "content_hash": content_hash,
             "battery_pct": battery_pct,
             "battery_mv": battery_mv,
             "fw_version": fw_version,
+            "charging": charging,
         }
 
     async def read_button_event(self) -> int:

@@ -23,7 +23,9 @@ class BleConnection(ABC):
 
     @abstractmethod
     async def read_status(self) -> dict:
-        """Read the `status` characteristic: {content_hash, battery_pct, battery_mv}."""
+        """Read the `status` characteristic: {content_hash, battery_pct, battery_mv,
+        charging}. charging is None on a display running firmware older than the
+        charge-status byte (see bleak_transport.py's BleakConnection.read_status)."""
 
     @abstractmethod
     async def write_data_transfer(self, chunk: bytes) -> None:
@@ -69,6 +71,10 @@ class MockDisplay:
         self.content_hash = 0
         self.battery_pct = battery_pct
         self.battery_mv = battery_mv
+        # Mirrors real firmware's charge-status GPIO read (battery.c) — plain attribute
+        # rather than a method, same as battery_pct/battery_mv above, so a test can just
+        # set it directly before the next read_status().
+        self.charging = False
         self.last_rendered: dict | None = None
         self._reassembler = protocol.ChunkReassembler()
 
@@ -110,6 +116,7 @@ class MockDisplay:
             "content_hash": self.content_hash,
             "battery_pct": self.battery_pct,
             "battery_mv": self.battery_mv,
+            "charging": self.charging,
         }
 
     def apply_chunk(self, chunk: bytes) -> None:

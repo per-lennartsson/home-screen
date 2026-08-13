@@ -30,16 +30,36 @@ function BatterySparkline({ history }) {
   const min = Math.min(...mvs);
   const max = Math.max(...mvs);
   const range = max - min || 1;
-  const points = history
-    .map((r, i) => {
-      const x = pad + (i / (history.length - 1)) * (w - pad * 2);
-      const y = pad + (1 - (r.battery_mv - min) / range) * (h - pad * 2);
-      return `${x},${y}`;
-    })
-    .join(" ");
+  const points = history.map((r, i) => ({
+    x: pad + (i / (history.length - 1)) * (w - pad * 2),
+    y: pad + (1 - (r.battery_mv - min) / range) * (h - pad * 2),
+    charging: r.is_charging,
+  }));
+  const anyCharging = points.some((p) => p.charging);
+  // One <line> per consecutive pair, colored by whether *either* end was logged while
+  // charging — the estimate below excludes exactly these gaps from its drain rate, so
+  // this is what "why does the number ignore that hump" points back at.
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
-      <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" />
+      {points.slice(1).map((p, i) => {
+        const prev = points[i];
+        const charging = prev.charging || p.charging;
+        return (
+          <line
+            key={i}
+            x1={prev.x}
+            y1={prev.y}
+            x2={p.x}
+            y2={p.y}
+            stroke={charging ? "var(--warn)" : "currentColor"}
+            strokeWidth="1.5"
+            strokeDasharray={charging ? "3 2" : undefined}
+          />
+        );
+      })}
+      {anyCharging && (
+        <title>Amber/dashed segments were logged while charging and are excluded from the drain estimate below.</title>
+      )}
     </svg>
   );
 }
@@ -75,6 +95,40 @@ function batteryEstimateLabel(estimate, historyLength) {
     `(${estimate.sample_count} readings).`
   );
 }
+
+function chargingNote(estimate) {
+  if (!estimate || !estimate.charging_excluded_count) return null;
+  const n = estimate.charging_excluded_count;
+  return `${n} reading${n === 1 ? "" : "s"} logged while charging (amber/dashed above) were excluded from these rates.`;
+}
+
+function powerBreakdownLabel(estimate) {
+  if (!estimate) return null;
+  const { checkin_mv_per_hour, checkin_sample_count, push_mv_per_hour, push_sample_count } = estimate;
+  if (checkin_mv_per_hour == null && push_mv_per_hour == null) {
+    const have = checkin_sample_count + push_sample_count;
+    return have > 0
+      ? `Not enough check-in-only or content-push wakes logged yet to split idle drain from push cost ` +
+          `(${have} wake${have === 1 ? "" : "s"} so far, need ${MIN_BREAKDOWN_SAMPLES}+ of each).`
+      : null;
+  }
+  const parts = [];
+  if (checkin_mv_per_hour != null) {
+    parts.push(`~${checkin_mv_per_hour.toFixed(2)} mV/hour on a bare check-in (${checkin_sample_count} wakes)`);
+  }
+  if (push_mv_per_hour != null) {
+    parts.push(`~${push_mv_per_hour.toFixed(2)} mV/hour when it also pushes new content (${push_sample_count} wakes)`);
+  }
+  let extra = "";
+  if (checkin_mv_per_hour != null && push_mv_per_hour != null) {
+    const delta = push_mv_per_hour - checkin_mv_per_hour;
+    extra = ` — a content push costs about ${delta >= 0 ? "+" : ""}${delta.toFixed(2)} mV/hour over a bare check-in.`;
+  }
+  return `Power breakdown: ${parts.join(", ")}.${extra}`;
+}
+
+// Mirrors app/services/battery.py's MIN_SAMPLES_FOR_POWER_BREAKDOWN.
+const MIN_BREAKDOWN_SAMPLES = 2;
 
 function warningFor(display) {
   const lowBattery = display.battery_pct != null && display.battery_pct < LOW_BATTERY_PCT;
@@ -538,6 +592,12 @@ export default function DisplaysPage() {
                       )}
                       <div className="muted" style={{ marginTop: 4 }}>
                         {batteryEstimateLabel(batteryEstimate, batteryHistory.length)}
+                      </div>
+                      <div className="muted" style={{ marginTop: 4 }}>
+                        {powerBreakdownLabel(batteryEstimate)}
+                      </div>
+                      <div className="muted" style={{ marginTop: 4 }}>
+                        {chargingNote(batteryEstimate)}
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 9, marginTop: 8 }}>
                         <input

@@ -36,7 +36,10 @@ than a phone BLE app — `gateway/README.md` walks through that.
   against Python-generated reference vectors — see `tests/`.
 - `src/battery.c/.h` — ADC read on the XIAO nRF52840's VBAT divider (P0.31/AIN7, enabled
   via P0.14 — spec 4.5). The enable pin is held low permanently rather than toggled
-  per-read; see the comment in `battery_init()` for the hardware risk that avoids.
+  per-read; see the comment in `battery_init()` for the hardware risk that avoids. Also
+  reads charge status straight off the onboard BQ25101 charger IC's status pin (P0.17,
+  the same signal that drives the board's charging LED) — a plain GPIO level, no ADC or
+  averaging involved.
 - `src/epaper_ssd1683.c/.h` — the real SSD1683 panel driver: reset, init sequence, full
   refresh, identify. Command bytes are transcribed from the datasheet's command table;
   the one value that *isn't* pinned to the primary source is the border waveform
@@ -56,8 +59,8 @@ than a phone BLE app — `gateway/README.md` walks through that.
   because a full-panel RGB565 buffer would be 240KB and does not fit in RAM.
   Still no word-wrap and no partial refresh — every apply is a full redraw and a full
   panel refresh.
-- `boards/xiao_ble.overlay` — SPI3 + GPIO wiring for CS/DC/RST/BUSY and the battery ADC,
-  per the pin mapping above.
+- `boards/xiao_ble.overlay` — SPI3 + GPIO wiring for CS/DC/RST/BUSY, the battery ADC, and
+  charge status, per the pin mapping above.
 
 ## What you'll need to fill in / verify
 
@@ -75,6 +78,9 @@ than a phone BLE app — `gateway/README.md` walks through that.
 2. **Verify the VBAT divider ratio** (`VBAT_DIVIDER_RATIO` in `battery.c`, currently 3)
    against a real battery and multimeter — the ~1/3 figure is what's documented for this
    board, not something measured on this specific unit.
+3. **Verify P0.17 as the charge-status pin** (`charge-status-gpios` in
+   `boards/xiao_ble.overlay`) against your actual board revision — sourced from the Seeed
+   forum, not a schematic in this repo, same caveat as the VBAT divider ratio above.
 
 ## Build
 

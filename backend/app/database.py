@@ -46,6 +46,18 @@ def ensure_schema_additions() -> None:
         if display_cols and "last_full_refresh_at" not in display_cols:
             conn.exec_driver_sql("ALTER TABLE displays ADD COLUMN last_full_refresh_at DATETIME")
 
+        reading_cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(battery_readings)")}
+        if reading_cols and "pushed_payload" not in reading_cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE battery_readings ADD COLUMN pushed_payload BOOLEAN NOT NULL DEFAULT 0"
+            )
+        if reading_cols and "reported_charging" not in reading_cols:
+            # No DEFAULT 0 here (unlike pushed_payload above) — NULL is the correct
+            # backfill value for every pre-existing row, since none of them have a real
+            # firmware signal to report; see BatteryReading.reported_charging's docstring
+            # for why NULL and False mean different things to battery.py.
+            conn.exec_driver_sql("ALTER TABLE battery_readings ADD COLUMN reported_charging BOOLEAN")
+
 
 async def get_db():
     # async def, not def: FastAPI runs sync generator dependencies through anyio's

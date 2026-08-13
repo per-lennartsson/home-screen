@@ -39,6 +39,12 @@
  * ADC input for the VBAT divider; P0.14 is the divider's active-low enable pin. See
  * battery.c for why P0.14 is held low permanently rather than toggled per-read (a
  * known hardware risk to P0.31 if driven high while configured as an analog input).
+ *
+ * Charge status (documented on the Seeed forum for XIAO nRF52840): P0.17 is wired
+ * on-module to the onboard BQ25101 charger IC's CHG output, the same signal that drives
+ * the board's charging LED — driven low while charging, high when not charging or
+ * charge-complete. Like P0.31/P0.14 above, this is an internal XIAO pin, not one of the
+ * D0-D10 header pins, so it doesn't compete with the panel/button wiring in this file.
  */
 
 &pinctrl {
@@ -138,6 +144,12 @@
 		 * falling through to a 4-second blind wait — see epd_wait_busy(). */
 		busy-gpios = <&gpio0 5 GPIO_ACTIVE_HIGH>; /* D5 — datasheet: high = busy */
 		battery-enable-gpios = <&gpio0 14 GPIO_ACTIVE_LOW>; /* low = divider enabled */
+		/* ACTIVE_LOW so gpio_pin_get_dt() reads 1 (active) exactly while the BQ25101
+		 * is charging, matching battery.c's bool out-param. No PULL flag: the CHG
+		 * pin is already driven push-pull-ish by the charger IC through the LED's
+		 * pull path on the XIAO module itself (same reasoning as busy-gpios above
+		 * not needing one — an actively-driven signal, not a floating input). */
+		charge-status-gpios = <&gpio0 17 GPIO_ACTIVE_LOW>;
 
 		/* One tactile button per checklist row (up to 5, the number of free GPIOs —
 		 * see header comment). Each ties its pin to GND when pressed; ACTIVE_LOW +

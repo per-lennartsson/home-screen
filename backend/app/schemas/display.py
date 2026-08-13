@@ -43,6 +43,10 @@ class DisplayStatusReport(BaseModel):
     content_hash: int
     battery_pct: int
     battery_mv: int
+    # None (the default, and what pre-fw_version-2 gateways send — see
+    # gateway/gateway/backend_client.py) means "no real signal available," not "not
+    # charging" — see BatteryReading.reported_charging's docstring.
+    charging: bool | None = None
 
 
 class ButtonEventReport(BaseModel):
@@ -81,7 +85,15 @@ class BatteryReadingOut(BaseModel):
     battery_pct: int
     battery_mv: int
     wake_interval_s: int
+    pushed_payload: bool
     recorded_at: datetime
+    # Real signal from the charger IC (None on firmware older than fw_version 2, or
+    # readings logged before this column existed — see the model's docstring).
+    reported_charging: bool | None = None
+    # app/services/battery.py's charging_flags: reported_charging when not None,
+    # otherwise inferred from the mv trend around this reading — see that function's
+    # docstring for why both exist.
+    is_charging: bool = False
 
 
 class BatteryEstimateOut(BaseModel):
@@ -99,6 +111,24 @@ class BatteryEstimateOut(BaseModel):
     estimated_days_remaining: float | None = None
     sample_count: int
     span_hours: float | None = None
+
+    # Power breakdown, independent of the status/estimate above: mean observed drain
+    # rate over wake-to-wake gaps where that wake was a bare status check-in vs one that
+    # also pushed a content payload (diff or full — see BatteryReading.pushed_payload).
+    # Pooled across all logged wake intervals for this display, since check-in/push cost
+    # is a roughly fixed per-event cost rather than something that scales with how often
+    # the display wakes up. None when there aren't enough of that category's gaps yet
+    # (see battery.py's MIN_SAMPLES_FOR_POWER_BREAKDOWN) to trust an average.
+    checkin_mv_per_hour: float | None = None
+    checkin_sample_count: int = 0
+    push_mv_per_hour: float | None = None
+    push_sample_count: int = 0
+
+    # How many of this display's logged readings were inferred to be mid-charge (see
+    # app/services/battery.py's charging_flags) and excluded from every rate above —
+    # there's no charge-detect signal from the device, so this is inferred from the mv
+    # trend, not reported firmware state.
+    charging_excluded_count: int = 0
 
 
 class PayloadInSync(BaseModel):

@@ -27,6 +27,15 @@ static const struct gpio_dt_spec battery_enable =
 #define HAVE_BATTERY_ENABLE 1
 #endif
 
+/* BQ25101 CHG output via the XIAO module's own wiring (see xiao_ble.overlay) — absent
+ * on any board whose overlay doesn't define it, same "degrade instead of failing to
+ * build" treatment as HAVE_BATTERY_ADC/HAVE_BATTERY_ENABLE above. */
+#if DT_NODE_HAS_PROP(BATTERY_NODE, charge_status_gpios)
+static const struct gpio_dt_spec charge_status =
+	GPIO_DT_SPEC_GET(BATTERY_NODE, charge_status_gpios);
+#define HAVE_CHARGE_STATUS 1
+#endif
+
 /* battery_voltage_mv = adc_reading_mv * VBAT_DIVIDER_RATIO. XIAO nRF52840's VBAT
  * divider is commonly cited as ~1/3 (documented as "divide by about 1/3" / ratio
  * 1510/510 on the Seeed forum) — treated as a placeholder ratio like any other board's
@@ -60,6 +69,20 @@ int battery_init(void)
 	}
 #endif
 
+#if HAVE_CHARGE_STATUS
+	if (!gpio_is_ready_dt(&charge_status)) {
+		LOG_ERR("battery: charge-status GPIO not ready");
+		return -ENODEV;
+	}
+	/* Plain input, no pull — the charger IC actively drives this line (see
+	 * xiao_ble.overlay), so an internal pull would only fight it. */
+	int charge_err = gpio_pin_configure_dt(&charge_status, GPIO_INPUT);
+	if (charge_err) {
+		LOG_ERR("battery: failed to configure charge-status GPIO (%d)", charge_err);
+		return charge_err;
+	}
+#endif
+
 #if HAVE_BATTERY_ADC
 	if (!adc_is_ready_dt(&battery_adc)) {
 		LOG_ERR("battery: ADC device not ready");
@@ -86,9 +109,16 @@ static uint8_t battery_pct_from_mv(uint16_t battery_mv)
 	return (uint8_t)(100 * (clamped_mv - BATTERY_EMPTY_MV) / (BATTERY_FULL_MV - BATTERY_EMPTY_MV));
 }
 
-int battery_read(uint8_t *out_battery_pct, uint16_t *out_battery_mv)
+int battery_read(uint8_t *out_battery_pct, uint16_t *out_battery_mv, bool *out_charging)
 {
 	uint16_t battery_mv;
+
+#if HAVE_CHARGE_STATUS
+	int charge_val = gpio_pin_get_dt(&charge_status);
+	*out_charging = (charge_val > 0); /* ACTIVE_LOW spec: 1 = active = charging */
+#else
+	*out_charging = false;
+#endif
 
 #if HAVE_BATTERY_ADC
 	uint16_t raw;

@@ -90,19 +90,27 @@ scan response instead of the primary packet, since the 128-bit UUID already fill
 primary packet's 31-byte budget. Regenerating the base means changing both files in the
 same commit and reflashing.
 
-**`status` value** — `struct status_value`, `__packed`, little-endian, 9 bytes:
+**`status` value** — `struct status_value`, `__packed`, little-endian, 9 bytes as of
+fw_version 1, 10 as of fw_version 2:
 
 ```
 bytes 0-3 : content_hash  (uint32)
 byte  4   : battery_pct   (uint8)
 bytes 5-6 : battery_mv    (uint16)
 bytes 7-8 : fw_version    (uint16)
+byte  9   : charging      (uint8, 0/1 — fw_version 2+ only)
 ```
 
 The `__packed` matters: without it the compiler would pad `battery_mv` to a 2-byte
 boundary and every field after `content_hash` would shift by one. The gateway parses
-exactly these 9 bytes and ignores anything after them, so firmware may append fields
-without breaking an older gateway.
+the first 9 bytes unconditionally and ignores anything after them unless present, so
+firmware may append fields without breaking an older gateway — `charging` is the first
+field to actually use that: `bleak_transport.py`'s `read_status()` treats a 9-byte read
+(fw_version 1, no charger-IC GPIO wired up yet) as `charging: None` — "unknown," not
+"not charging" — rather than requiring the 10th byte. `charging` is read straight off
+the BQ25101 charger IC's status pin (`firmware/src/battery.c`), not derived from
+`battery_mv`; the backend's own voltage-trend inference
+(`app/services/battery.py`'s `charging_flags`) is the fallback for `None`.
 
 **`button_event` value** — a single byte, bit *i* = checklist row *i*'s button pressed
 since the last read. Reading it clears the mask firmware-side, so the gateway must read

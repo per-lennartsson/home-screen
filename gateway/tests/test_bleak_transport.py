@@ -113,6 +113,37 @@ async def test_read_status_is_nine_bytes_packed():
     assert len(_status_bytes(1, 2, 3)) == 9
 
 
+async def test_read_status_without_charging_byte_reports_none():
+    """A display still on pre-charge-status firmware (fw_version 1, 9-byte status) has
+    nothing to say about charging — None, not False, so the backend knows to fall back
+    to its own inference instead of trusting a fabricated "not charging"."""
+    client = FakeClient(
+        "AA:BB", values={uuids.STATUS_CHAR_UUID: _status_bytes(0xDEADBEEF, 87, 3912)}
+    )
+    conn = BleakConnection(client, mtu_payload_size=237)
+
+    status = await conn.read_status()
+
+    assert status["charging"] is None
+
+
+@pytest.mark.parametrize("charging_byte,expected", [(1, True), (0, False)])
+async def test_read_status_reads_appended_charging_byte(charging_byte, expected):
+    """fw_version 2+: struct status_value gained a 10th byte (battery.c's charge-status
+    GPIO read) appended after fw_version — must not disturb any of the original 9."""
+    raw = _status_bytes(0xDEADBEEF, 87, 3912, fw_version=2) + bytes([charging_byte])
+    client = FakeClient("AA:BB", values={uuids.STATUS_CHAR_UUID: raw})
+    conn = BleakConnection(client, mtu_payload_size=237)
+
+    status = await conn.read_status()
+
+    assert status["content_hash"] == 0xDEADBEEF
+    assert status["battery_pct"] == 87
+    assert status["battery_mv"] == 3912
+    assert status["fw_version"] == 2
+    assert status["charging"] is expected
+
+
 async def test_read_status_rejects_a_short_read():
     client = FakeClient("AA:BB", values={uuids.STATUS_CHAR_UUID: b"\x01\x02\x03"})
     conn = BleakConnection(client, mtu_payload_size=237)

@@ -115,7 +115,11 @@ class GatewayService:
                 state.last_checkin_monotonic = time.monotonic()
 
                 await self.backend.report_status(
-                    state.display_id, status["content_hash"], status["battery_pct"], status["battery_mv"]
+                    state.display_id,
+                    status["content_hash"],
+                    status["battery_pct"],
+                    status["battery_mv"],
+                    status.get("charging"),
                 )
 
                 # Read/report a pending button press before fetching the payload — not

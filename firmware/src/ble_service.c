@@ -16,7 +16,11 @@
 
 LOG_MODULE_REGISTER(ble_service, CONFIG_LOG_DEFAULT_LEVEL);
 
-#define FW_VERSION 1
+/* Bumped for the status struct's new `charging` byte (see struct status_value below) —
+ * the gateway doesn't branch on this number, it just tolerates a status read shorter
+ * than expected (bleak_transport.py), but it's still real signal for "has this board
+ * been reflashed since charge-status was added" if that's ever needed. */
+#define FW_VERSION 2
 
 /* Real 128-bit base UUID for this project (spec 4.2 asked for one to replace its
  * placeholder pattern; generated with uuidgen). The last 16 bits of the final segment
@@ -63,6 +67,14 @@ struct __packed status_value {
 	uint8_t battery_pct;
 	uint16_t battery_mv;
 	uint16_t fw_version;
+	/* Appended, not inserted — docs/protocol.md: "the gateway parses exactly [the
+	 * first] 9 bytes and ignores anything after them, so firmware may append fields
+	 * without breaking an older gateway." Read straight off the charger IC's status
+	 * pin by battery.c, not derived from battery_mv. 0/1 rather than bool: this
+	 * struct is __packed onto the wire and read raw by a non-C gateway, so its
+	 * layout is spelled out in fixed-width integer types throughout, not the C
+	 * compiler's (unspecified-width) _Bool. */
+	uint8_t charging;
 };
 
 static struct status_value current_status = {
@@ -70,6 +82,7 @@ static struct status_value current_status = {
 	.battery_pct = 0,
 	.battery_mv = 0,
 	.fw_version = FW_VERSION,
+	.charging = 0,
 };
 
 static chunk_reassembler_t reassembler;
@@ -91,6 +104,7 @@ static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr
 		.battery_pct = current_status.battery_pct,
 		.battery_mv = sys_cpu_to_le16(current_status.battery_mv),
 		.fw_version = sys_cpu_to_le16(current_status.fw_version),
+		.charging = current_status.charging,
 	};
 	return bt_gatt_attr_read(conn, attr, buf, len, offset, &wire_value, sizeof(wire_value));
 }
@@ -433,8 +447,9 @@ void ble_service_set_content_hash(uint32_t content_hash)
 	current_status.content_hash = content_hash;
 }
 
-void ble_service_set_battery(uint8_t battery_pct, uint16_t battery_mv)
+void ble_service_set_battery(uint8_t battery_pct, uint16_t battery_mv, bool charging)
 {
 	current_status.battery_pct = battery_pct;
 	current_status.battery_mv = battery_mv;
+	current_status.charging = charging ? 1 : 0;
 }

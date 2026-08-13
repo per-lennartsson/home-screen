@@ -9,6 +9,7 @@
 #ifndef BLE_SERVICE_H_
 #define BLE_SERVICE_H_
 
+#include <stdbool.h>
 #include <stdint.h>
 
 enum ble_service_event {
@@ -56,7 +57,7 @@ int ble_service_stop_advertising(void);
 /* Updates what the `status` characteristic reports on its next read. Called by main.c
  * once a data_transfer message has been applied, and by battery.c after each reading. */
 void ble_service_set_content_hash(uint32_t content_hash);
-void ble_service_set_battery(uint8_t battery_pct, uint16_t battery_mv);
+void ble_service_set_battery(uint8_t battery_pct, uint16_t battery_mv, bool charging);
 
 /* Read by main.c's DEEP_SLEEP loop on every cycle. Starts at
  * BLE_SERVICE_DEFAULT_WAKE_INTERVAL_S and is updated in place by an incoming
