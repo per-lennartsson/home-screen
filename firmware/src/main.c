@@ -31,6 +31,14 @@ LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 /* Not yet a Kconfig option — see firmware/README.md item 1. */
 #define APP_ADVERTISING_WINDOW_MS 4000
 
+/* How many consecutive wake cycles may elapse with no gateway BLE connection before the
+ * panel shows a "not connected" badge (epaper_set_connection_lost) instead of silently
+ * going back to sleep with stale content and no indication anything is wrong. Not yet a
+ * Kconfig/BLE-command option, same status as APP_ADVERTISING_WINDOW_MS above — nothing
+ * about the wire protocol needs to change to make this runtime-configurable later the
+ * same way BLE_SERVICE_COMMAND_SET_WAKE_INTERVAL_S did for the wake interval. */
+#define CONNECTION_LOST_THRESHOLD 3
+
 /* DEEP_SLEEP's duration itself is no longer a compile-time constant here — it's
  * ble_service_get_wake_interval_s(), runtime-configurable via
  * BLE_SERVICE_COMMAND_SET_WAKE_INTERVAL_S (ble_service.h) so the backend/gateway can
@@ -62,9 +70,23 @@ static K_SEM_DEFINE(wake_sem, 0, 1);
 static const struct device *wdt_dev;
 static int wdt_channel_id = -1;
 
+/* Set by on_ble_event on CONNECTED, read (and reset) by the main loop once each cycle's
+ * advertise_and_wait_for_sync() call returns. A connection is enough to count as
+ * "reached the gateway" here even in the (in-sync, nothing to push) case where no
+ * data_transfer ever happens — that's the normal steady state, not a failure. */
+static volatile bool connected_this_cycle;
+
+/* How many wake cycles in a row have ended with no BLE connection at all. Saturates at
+ * CONNECTION_LOST_THRESHOLD rather than growing without bound while disconnected for a
+ * long time — epaper_set_connection_lost is already a no-op once the badge is showing,
+ * so nothing is lost by not counting higher. */
+static uint8_t consecutive_connect_failures;
+
 static void on_ble_event(enum ble_service_event event)
 {
-	if (event == BLE_SERVICE_EVENT_DISCONNECTED) {
+	if (event == BLE_SERVICE_EVENT_CONNECTED) {
+		connected_this_cycle = true;
+	} else if (event == BLE_SERVICE_EVENT_DISCONNECTED) {
 		/* Clean or unexpected disconnect — either way, spec 4.1 says always
 		 * return to DEEP_SLEEP, never leave the radio in an ambiguous state. */
 		k_sem_give(&sync_done_sem);
@@ -203,11 +225,22 @@ int main(void)
 		bool charging;
 		if (battery_read(&battery_pct, &battery_mv, &charging) == 0) {
 			ble_service_set_battery(battery_pct, battery_mv, charging);
+			/* Locally-known state, drawn independent of the gateway — see
+			 * epaper_set_charging's doc comment. */
+			epaper_set_charging(charging);
 		} else {
 			LOG_WRN("battery read failed, status will report last known value");
 		}
 
+		connected_this_cycle = false;
 		advertise_and_wait_for_sync();
+
+		if (connected_this_cycle) {
+			consecutive_connect_failures = 0;
+		} else if (consecutive_connect_failures < CONNECTION_LOST_THRESHOLD) {
+			consecutive_connect_failures++;
+		}
+		epaper_set_connection_lost(consecutive_connect_failures >= CONNECTION_LOST_THRESHOLD);
 
 		/* Cycle complete, synced or not — feed the watchdog and go back to
 		 * sleep. Sleeping via k_sem_take (not a plain k_msleep) lets a checklist

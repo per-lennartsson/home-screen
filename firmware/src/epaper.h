@@ -41,4 +41,26 @@ void epaper_identify(void);
  * content update. */
 void epaper_set_rotation(bool rotate_180);
 
+/* System-status overlays: small icons composited on top of whatever content is
+ * currently retained, on every subsequent panel push, independent of the gateway. Set
+ * from main.c using state the firmware already knows locally (the charger IC's status
+ * pin via battery.c, and the advertising-window retry counter) — the whole point is
+ * these stay visible even when the gateway itself is unreachable. See epaper.c for the
+ * icons and corner placement. Both are no-ops when the value hasn't changed, so calling
+ * either every wake cycle (as main.c does) doesn't cost a panel refresh unless the
+ * status actually flipped. */
+
+/* Charging indicator, top-left corner. Composited into every render regardless of what
+ * triggered it — including a freshly-applied full/diff layout — so it is never hidden
+ * by new gateway content occupying the same corner. */
+void epaper_set_charging(bool charging);
+
+/* "Not connected" indicator, top-right corner. main.c sets this once the advertising
+ * window has elapsed with no gateway connection some configurable number of times in a
+ * row. epaper_apply_full/epaper_apply_diff clear it themselves the moment real content
+ * actually arrives (proof the gateway is reachable again), rather than waiting for
+ * main.c's end-of-cycle bookkeeping — so a new sync always wins over a stale badge in
+ * the same corner. */
+void epaper_set_connection_lost(bool lost);
+
 #endif /* EPAPER_H_ */
