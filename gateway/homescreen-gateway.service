@@ -1,0 +1,32 @@
+# systemd unit for running the gateway on a host with a Bluetooth radio (e.g. the
+# Proxmox VM that has the USB BT dongle passed through). See gateway/README.md.
+#
+# Install:
+#   sudo cp gateway/homescreen-gateway.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now homescreen-gateway
+#   journalctl -u homescreen-gateway -f
+#
+# Edit User=, WorkingDirectory=, and HOMESCREEN_GATEWAY_ID= below for your setup first.
+# The service user needs a Linux group that BlueZ's D-Bus policy grants scan/connect to
+# (usually `bluetooth` on Debian/Ubuntu) — add it with:
+#   sudo usermod -aG bluetooth homescreen
+
+[Unit]
+Description=HomeScreen BLE gateway
+After=bluetooth.target network-online.target
+Wants=bluetooth.target network-online.target
+
+[Service]
+Type=simple
+User=homescreen
+Group=bluetooth
+WorkingDirectory=/opt/home-screen/gateway
+Environment=HOMESCREEN_GATEWAY_ID=1
+Environment=HOMESCREEN_BACKEND_URL=http://localhost:8000
+ExecStart=/opt/home-screen/gateway/.venv/bin/python -m gateway run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
