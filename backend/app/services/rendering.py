@@ -45,18 +45,28 @@ def structure_signature_for(layout: dict) -> int:
     return crc32_of(canonical_json_bytes(_structure_only(layout)))
 
 
-def _format_value(raw: str | None, unit: str | None, precision) -> str | None:
-    """Applies a home_assistant element's "unit" and "precision" props to its raw
-    fetched state - same display-time formatting HA's own entity "Display precision"
-    setting does. Rounding only applies when the raw state parses as a number;
+def _format_value(raw: str | None, unit: str | None, precision, round_to=None) -> str | None:
+    """Applies a home_assistant element's "unit", "precision", and "round_to" props to
+    its raw fetched state - same display-time formatting HA's own entity "Display
+    precision" setting does, plus an optional snap-to-step before that (e.g. round_to=0.5
+    turns 21.34/21.26/20.98 into 21.5/21.0/21.0 instead of chasing every 0.1 wobble).
+    round_to exists for entities whose *displayed* value should change less often than
+    its raw precision would otherwise force - the content hash (and so a push) only
+    changes when the rounded value does, see rendering's module docstring and
+    ha_poller.py. Rounding only applies when the raw state parses as a number;
     non-numeric states (e.g. "on"/"off") pass through untouched but can still get a
     unit suffix appended."""
     if raw is None:
         return None
     text = raw
-    if precision not in (None, ""):
+    if precision not in (None, "") or round_to not in (None, ""):
         try:
-            text = f"{float(raw):.{int(precision)}f}"
+            num = float(raw)
+            if round_to not in (None, ""):
+                step = float(round_to)
+                if step > 0:
+                    num = round(num / step) * step
+            text = f"{num:.{int(precision)}f}" if precision not in (None, "") else f"{num:g}"
         except ValueError:
             text = raw
     return f"{text} {unit}" if unit else text
@@ -65,8 +75,8 @@ def _format_value(raw: str | None, unit: str | None, precision) -> str | None:
 def resolve_layout(layout: dict, live_values: dict[int, str]) -> dict:
     """Merge live_values (element_id -> latest fetched value) into a copy of the
     layout template. Static value elements pass through untouched; externally-sourced
-    ones get their current value substituted in (formatted per the element's "unit"
-    and "precision" props), or None if nothing's been fetched yet. Button elements are
+    ones get their current value substituted in (formatted per the element's "unit",
+    "precision", and "round_to" props), or None if nothing's been fetched yet. Button elements are
     similar but bind a runtime-only "checked" bool instead of replacing "value" - their
     label text is always static, only the checked state is live (see
     ElementLiveValue's "checked"/"unchecked" sentinel strings)."""
@@ -77,7 +87,7 @@ def resolve_layout(layout: dict, live_values: dict[int, str]) -> dict:
         props = element.setdefault("props", {})
         if props.get("source") == "home_assistant":
             raw = live_values.get(element.get("id"))
-            props["value"] = _format_value(raw, props.get("unit"), props.get("precision"))
+            props["value"] = _format_value(raw, props.get("unit"), props.get("precision"), props.get("round_to"))
         elif props.get("source") == "button":
             props["checked"] = live_values.get(element.get("id")) == "checked"
     return resolved

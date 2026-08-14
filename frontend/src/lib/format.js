@@ -16,15 +16,26 @@ export function parseUtc(isoString) {
 }
 
 // Applies a value element's display precision (rounds numeric states to N decimals,
-// same rounding HA's own "Display precision" entity setting does) and appends its unit
-// of measurement suffix. Non-numeric states pass through precision untouched — a unit
-// can still be appended (e.g. a text sensor with a custom unit).
-export function formatEntityValue(rawValue, { unit, precision } = {}) {
+// same rounding HA's own "Display precision" entity setting does), an optional
+// roundTo step snap (e.g. 0.5 turns 21.34/21.26/20.98 into 21.5/21.0/21.0 instead of
+// chasing every 0.1 wobble — for entities that should read as precise but shouldn't
+// repaint on every minor sensor jitter), and appends its unit of measurement suffix.
+// Non-numeric states pass through both untouched — a unit can still be appended (e.g.
+// a text sensor with a custom unit).
+export function formatEntityValue(rawValue, { unit, precision, roundTo } = {}) {
   if (rawValue == null) return rawValue;
   let text = rawValue;
-  if (precision !== undefined && precision !== null && precision !== "") {
-    const num = Number(rawValue);
-    if (!Number.isNaN(num)) text = num.toFixed(Number(precision));
+  const hasPrecision = precision !== undefined && precision !== null && precision !== "";
+  const hasRoundTo = roundTo !== undefined && roundTo !== null && roundTo !== "";
+  if (hasPrecision || hasRoundTo) {
+    let num = Number(rawValue);
+    if (!Number.isNaN(num)) {
+      if (hasRoundTo) {
+        const step = Number(roundTo);
+        if (step > 0) num = Math.round(num / step) * step;
+      }
+      text = hasPrecision ? num.toFixed(Number(precision)) : String(num);
+    }
   }
   return unit ? `${text} ${unit}` : text;
 }

@@ -479,6 +479,19 @@ export default function DesignsPage() {
                           <option value="3">3</option>
                         </select>
                       </div>
+                      <div className="field" style={{ marginBottom: 0 }}>
+                        <label>Round to nearest</label>
+                        <select
+                          value={selected.roundTo}
+                          onChange={(e) => updateSelected({ roundTo: e.target.value })}
+                        >
+                          <option value="">Off — every change repaints</option>
+                          <option value="0.5">0.5</option>
+                          <option value="1">1</option>
+                          <option value="2">2</option>
+                          <option value="5">5</option>
+                        </select>
+                      </div>
                       {selected.entityId &&
                         (() => {
                           const cached = entityValues[entityValueKey(selected.entityId, selected.attribute)];

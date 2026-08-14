@@ -19,6 +19,7 @@ export function emptyElement() {
     attribute: "",
     unit: "",
     precision: "",
+    roundTo: "",
     buttonIndex: 0,
     fontSize: DEFAULT_FONT_SIZE,
     bold: false,
@@ -41,6 +42,7 @@ export function toLayoutJson(elements) {
         if (el.attribute) props.attribute = el.attribute;
         if (el.unit) props.unit = el.unit;
         if (el.precision !== "" && el.precision != null) props.precision = Number(el.precision);
+        if (el.roundTo !== "" && el.roundTo != null) props.round_to = Number(el.roundTo);
       } else {
         props = { source: "static", value: el.value };
       }
@@ -68,6 +70,7 @@ export function fromLayoutJson(layout) {
     attribute: el.props?.attribute || "",
     unit: el.props?.unit || "",
     precision: el.props?.precision ?? "",
+    roundTo: el.props?.round_to ?? "",
     buttonIndex: el.props?.button_index ?? 0,
     // Snapped, not taken verbatim: designs saved before the ladder existed can hold any
     // px value, and the device has no font for an off-ladder size.
