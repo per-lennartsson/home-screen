@@ -49,7 +49,11 @@ than a phone BLE app — `gateway/README.md` walks through that.
   verify from the datasheet itself.
 - `src/epaper.c/.h` — the integration layer between the chunk protocol and the panel
   driver. `epaper_apply_full` parses the flat binary layout payload and re-rasterizes;
-  `epaper_apply_diff` patches the retained layout and re-rasterizes from it.
+  `epaper_apply_diff` patches the retained layout and re-rasterizes from it. Also puts the
+  panel into SSD1683 deep sleep after every push and wakes it (a hardware reset, since
+  that's what exiting deep sleep requires) before the next one — the driver board has no
+  switched power path to the panel (see `boards/xiao_ble.overlay`'s pin table), so this is
+  the only lever available for its idle draw between wake cycles.
 - `src/layout_store.c/.h` — retains the last-applied layout in RAM so diffs have
   something to patch, and parses the flat binary wire format (`docs/protocol.md`).
 - `src/rasterizer.c/.h` + `src/fonts/` — draws that layout into a 1bpp framebuffer using

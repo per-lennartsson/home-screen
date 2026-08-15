@@ -34,6 +34,13 @@ LOG_MODULE_REGISTER(epaper, CONFIG_LOG_DEFAULT_LEVEL);
 static uint8_t framebuffer[EPD_FRAMEBUFFER_SIZE];
 static bool current_rotate_180;
 
+/* Tracks whether the panel is currently in SSD1683 deep sleep, so epd_wake/epd_sleep
+ * below only touch the hardware (and pay a reset's worth of latency) on an actual state
+ * change rather than on every call. Starts false to match epaper_init's post-init state:
+ * the panel is awake immediately after epd_ssd1683_init(), before this file ever calls
+ * epd_sleep() for the first time. */
+static bool panel_asleep;
+
 /* System-status overlays (epaper_set_charging/epaper_set_connection_lost, epaper.h) —
  * small fixed icons, independent of layout_store/rasterizer, so they can be drawn even
  * when the gateway has never sent anything at all. Hand-authored as row strings ('.' =
@@ -103,6 +110,30 @@ static void draw_overlays(void)
 	}
 }
 
+/* Between panel updates the SoC sleeps for the whole wake interval (main.c) with the
+ * panel's own supply rail left on — there's no switched power path to it (see
+ * boards/xiao_ble.overlay's pin table for the driver board: signal lines only, no
+ * enable/regulator pin). Parking it in SSD1683 deep sleep instead of leaving it in
+ * whatever state the last refresh left it in is the only lever available here. Exiting
+ * deep sleep needs a hardware reset per the datasheet (epd_ssd1683_sleep's comment), which
+ * is exactly what epd_ssd1683_init() already does along with the register setup a reset
+ * clears — so it doubles as the wake call. */
+static void epd_wake(void)
+{
+	if (panel_asleep) {
+		epd_ssd1683_init();
+		panel_asleep = false;
+	}
+}
+
+static void epd_sleep(void)
+{
+	if (!panel_asleep) {
+		epd_ssd1683_sleep();
+		panel_asleep = true;
+	}
+}
+
 /* Shared tail end of every panel update: re-rasterize the retained layout, composite
  * whichever status overlays are currently active on top of it, then push. Overlays are
  * redrawn from scratch here rather than persisted across calls, since rasterizer_render
@@ -110,9 +141,12 @@ static void draw_overlays(void)
  * win over a stale connection-lost badge in the same corner, with no special-casing. */
 static bool render_and_push(void)
 {
+	epd_wake();
 	rasterizer_render(framebuffer, sizeof(framebuffer), layout_store_get(), current_rotate_180);
 	draw_overlays();
-	return epd_ssd1683_push_full(framebuffer, sizeof(framebuffer)) == 0;
+	bool ok = epd_ssd1683_push_full(framebuffer, sizeof(framebuffer)) == 0;
+	epd_sleep();
+	return ok;
 }
 
 static bool push_blank_frame(void)
@@ -134,6 +168,10 @@ int epaper_init(void)
 	if (!push_blank_frame()) {
 		LOG_WRN("epaper: initial blank-frame push failed");
 	}
+
+	/* Nothing else to draw until the gateway sends real content or a debug command
+	 * runs — see epd_wake()'s call sites for how the panel comes back for those. */
+	epd_sleep();
 	return 0;
 }
 
@@ -189,6 +227,7 @@ bool epaper_apply_diff(const uint8_t *data, size_t len)
 
 void epaper_force_full_refresh(void)
 {
+	epd_wake();
 	for (int i = 0; i < FULL_REFRESH_FLASH_CYCLES; i++) {
 		memset(framebuffer, 0x00, sizeof(framebuffer)); /* 0 = black */
 		epd_ssd1683_push_full(framebuffer, sizeof(framebuffer));
@@ -197,13 +236,16 @@ void epaper_force_full_refresh(void)
 	}
 
 	/* Redraw whatever layout_store already has retained so the display ends up showing
-	 * its current content again, just cleanly. */
+	 * its current content again, just cleanly — also puts the panel back to sleep once
+	 * that settles, via render_and_push's own epd_sleep() call. */
 	render_and_push();
 }
 
 void epaper_identify(void)
 {
+	epd_wake();
 	epd_ssd1683_identify();
+	epd_sleep();
 }
 
 void epaper_set_rotation(bool rotate_180)
