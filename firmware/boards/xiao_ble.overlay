@@ -45,6 +45,13 @@
  * the board's charging LED — driven low while charging, high when not charging or
  * charge-complete. Like P0.31/P0.14 above, this is an internal XIAO pin, not one of the
  * D0-D10 header pins, so it doesn't compete with the panel/button wiring in this file.
+ *
+ * Charge current select (documented on the Seeed forum, "XIAO Sense nRF52840 - A Guide
+ * on How to set Battery Charging current"): P0.13 (silkscreened HICHG) is wired
+ * on-module to the BQ25101's ISET pair — floating/input (the power-on default) selects
+ * 50 mA, driven low selects 100 mA. battery.c drives it low permanently at boot, the
+ * same "set once, leave it" treatment as battery-enable-gpios above, since there's no
+ * reason to ever fall back to the slower rate.
  */
 
 &pinctrl {
@@ -150,6 +157,9 @@
 		 * pull path on the XIAO module itself (same reasoning as busy-gpios above
 		 * not needing one — an actively-driven signal, not a floating input). */
 		charge-status-gpios = <&gpio0 17 GPIO_ACTIVE_LOW>;
+		/* ACTIVE_LOW so GPIO_OUTPUT_ACTIVE (battery.c) drives the physical pin low,
+		 * selecting the BQ25101's 100 mA charge rate instead of the 50 mA default. */
+		charge-current-gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
 
 		/* One tactile button per checklist row (up to 5, the number of free GPIOs —
 		 * see header comment). Each ties its pin to GND when pressed; ACTIVE_LOW +

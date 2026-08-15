@@ -36,6 +36,15 @@ static const struct gpio_dt_spec charge_status =
 #define HAVE_CHARGE_STATUS 1
 #endif
 
+/* BQ25101 ISET select via the XIAO module's HICHG pin (see xiao_ble.overlay) — same
+ * "degrade instead of failing to build" treatment as the others above. Absent, the
+ * charger just stays at its power-on-default 50 mA rate. */
+#if DT_NODE_HAS_PROP(BATTERY_NODE, charge_current_gpios)
+static const struct gpio_dt_spec charge_current =
+	GPIO_DT_SPEC_GET(BATTERY_NODE, charge_current_gpios);
+#define HAVE_CHARGE_CURRENT 1
+#endif
+
 /* battery_voltage_mv = adc_reading_mv * VBAT_DIVIDER_RATIO. XIAO nRF52840's VBAT
  * divider is commonly cited as ~1/3 (documented as "divide by about 1/3" / ratio
  * 1510/510 on the Seeed forum) — treated as a placeholder ratio like any other board's
@@ -80,6 +89,22 @@ int battery_init(void)
 	if (charge_err) {
 		LOG_ERR("battery: failed to configure charge-status GPIO (%d)", charge_err);
 		return charge_err;
+	}
+#endif
+
+#if HAVE_CHARGE_CURRENT
+	if (!gpio_is_ready_dt(&charge_current)) {
+		LOG_ERR("battery: charge-current GPIO not ready");
+		return -ENODEV;
+	}
+	/* Configured once and left driven low permanently, selecting the BQ25101's
+	 * 100 mA rate instead of the 50 mA it powers on with — no reason to ever fall
+	 * back to the slower one, so this never gets toggled per-read like the ADC
+	 * divider enable above intentionally isn't either. */
+	int charge_current_err = gpio_pin_configure_dt(&charge_current, GPIO_OUTPUT_ACTIVE);
+	if (charge_current_err) {
+		LOG_ERR("battery: failed to select charge current (%d)", charge_current_err);
+		return charge_current_err;
 	}
 #endif
 

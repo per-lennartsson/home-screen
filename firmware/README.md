@@ -39,7 +39,8 @@ than a phone BLE app — `gateway/README.md` walks through that.
   per-read; see the comment in `battery_init()` for the hardware risk that avoids. Also
   reads charge status straight off the onboard BQ25101 charger IC's status pin (P0.17,
   the same signal that drives the board's charging LED) — a plain GPIO level, no ADC or
-  averaging involved.
+  averaging involved. Also drives P0.13 (HICHG) low permanently at boot to select the
+  charger's 100 mA rate instead of the 50 mA it powers on with.
 - `src/epaper_ssd1683.c/.h` — the real SSD1683 panel driver: reset, init sequence, full
   refresh, identify. Command bytes are transcribed from the datasheet's command table;
   the one value that *isn't* pinned to the primary source is the border waveform
@@ -81,6 +82,11 @@ than a phone BLE app — `gateway/README.md` walks through that.
 3. **Verify P0.17 as the charge-status pin** (`charge-status-gpios` in
    `boards/xiao_ble.overlay`) against your actual board revision — sourced from the Seeed
    forum, not a schematic in this repo, same caveat as the VBAT divider ratio above.
+4. **Verify P0.13 as the charge-current-select pin** (`charge-current-gpios` in
+   `boards/xiao_ble.overlay`) against your actual board revision — same Seeed-forum
+   sourcing and caveat as P0.17 above. If it's wrong, the failure mode is quiet (still
+   charges, just not at the intended rate), so it's worth confirming with a multimeter on
+   the charge current rather than trusting the pin number alone.
 
 ## Build
 
