@@ -1,0 +1,25 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8001:8000"
+    volumes:
+      - backend_data:/app/data
+    environment:
+      HOMESCREEN_DATA_DIR: /app/data
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_BACKEND_URL: http://backend:8000
+    depends_on:
+      - backend
+
+# No gateway service here on purpose: it needs the host's Bluetooth radio, and Docker
+# doesn't share host Bluetooth with containers. Run it on the host instead —
+# see gateway/README.md.
+
+volumes:
+  backend_data:

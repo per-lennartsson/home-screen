@@ -23,6 +23,20 @@ re-enable it if your host supports it. Frontend changes hot-reload automatically
 
 To stop: `docker compose down` (add `-v` to also drop the persisted backend data).
 
+### Deploying (e.g. via Portainer)
+
+`docker-compose.yml` bind-mounts source code into the containers for local hot-reload,
+which only works when the compose file's directory is your actual working copy. For a
+remote deploy (Portainer, a server, etc.) use `docker-compose.prod.yml` instead — same
+services, but built from the image only, no source bind mounts:
+
+```bash
+docker compose -f docker-compose.prod.yml up --build
+```
+
+In Portainer, set the stack's "Compose path" to `docker-compose.prod.yml` when deploying
+from this repository.
+
 ## Running against real displays
 
 The gateway needs the host's Bluetooth radio, which Docker Desktop doesn't share with
