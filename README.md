@@ -14,7 +14,7 @@ backend and frontend; the gateway runs outside Docker (see below).
 docker compose up --build
 ```
 
-- Backend: http://localhost:8000 (SQLite data persists in the `backend_data` volume)
+- Backend: http://localhost:8001 (SQLite data persists in the `backend_data` volume)
 - Frontend: http://localhost:5173
 
 Backend code changes require a restart (`docker compose restart backend`) — see the
